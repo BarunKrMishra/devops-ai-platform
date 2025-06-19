@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Search, Filter, Download, Star, Eye, Plus, Tag } from 'lucide-react';
+import { Search, Download, Eye, Plus, Tag } from 'lucide-react';
 import axios from 'axios';
-import { useAuth } from '../../contexts/AuthContext';
 
 interface Template {
   id: number;
@@ -23,10 +22,7 @@ const TemplateGalleryPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('');
-  const [showCreateModal, setShowCreateModal] = useState(false);
   const [selectedTemplate, setSelectedTemplate] = useState<Template | null>(null);
-  
-  const { user } = useAuth();
 
   useEffect(() => {
     fetchTemplates();
@@ -97,7 +93,6 @@ const TemplateGalleryPage: React.FC = () => {
               <p className="text-gray-400">Discover and use deployment templates to accelerate your projects</p>
             </div>
             <button
-              onClick={() => setShowCreateModal(true)}
               className="flex items-center space-x-2 px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-colors"
             >
               <Plus className="h-4 w-4" />
@@ -230,7 +225,6 @@ const TemplateGalleryPage: React.FC = () => {
           <div className="text-center py-12">
             <div className="text-gray-400 mb-4">No templates found matching your criteria</div>
             <button
-              onClick={() => setShowCreateModal(true)}
               className="px-6 py-3 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-colors"
             >
               Create the First Template

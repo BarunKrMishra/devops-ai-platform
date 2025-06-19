@@ -20,7 +20,7 @@ const MonitoringPage: React.FC = () => {
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [metrics, setMetrics] = useState<any>({});
   const [loading, setLoading] = useState(true);
-  const [selectedProject, setSelectedProject] = useState(1);
+  const [selectedProject] = useState(1);
 
   useEffect(() => {
     fetchMonitoringData();

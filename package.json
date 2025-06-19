@@ -69,6 +69,7 @@
     "snyk": "^1.1280.0",
     "supertest": "^6.3.4",
     "tailwindcss": "^3.4.14",
+    "terser": "^5.43.0",
     "typescript": "~5.6.2",
     "vite": "^5.4.10"
   },

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { TrendingUp, TrendingDown, AlertTriangle, DollarSign, Activity, Clock, Target } from 'lucide-react';
+import { TrendingUp, AlertTriangle, DollarSign, Activity, Target } from 'lucide-react';
 import axios from 'axios';
 import { useAuth } from '../../contexts/AuthContext';
 

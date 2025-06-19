@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { MessageSquare, Users, Bell, Settings, Send, UserPlus, Crown } from 'lucide-react';
+import { Bell, Settings, Send, UserPlus, Crown } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import io from 'socket.io-client';
 
@@ -26,7 +26,7 @@ const TeamCollaborationPage: React.FC = () => {
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [typingUsers, setTypingUsers] = useState<string[]>([]);
   const [socket, setSocket] = useState<any>(null);
-  const [selectedProject, setSelectedProject] = useState<number>(1);
+  const [selectedProject] = useState<number>(1);
   
   const { user } = useAuth();
 
@@ -50,7 +50,7 @@ const TeamCollaborationPage: React.FC = () => {
     });
 
     newSocket.on('user-stop-typing', (data: { userId: number }) => {
-      setTypingUsers(prev => prev.filter(u => u !== data.userName));
+      setTypingUsers(prev => prev.filter(u => u !== String(data.userId)));
     });
 
     // Mock team members

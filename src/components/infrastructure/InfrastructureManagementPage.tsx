@@ -1,23 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { Server, Database, Cloud, Plus, Settings, Activity, DollarSign } from 'lucide-react';
+import { Server, Database, Cloud, Plus, Activity, DollarSign } from 'lucide-react';
 import axios from 'axios';
 
-interface Resource {
-  id: number;
-  resource_type: string;
-  resource_id: string;
-  region: string;
-  status: string;
-  configuration: any;
-  cost_per_hour: number;
-  created_at: string;
-}
-
 const InfrastructureManagementPage: React.FC = () => {
-  const [resources, setResources] = useState<Resource[]>([]);
   const [overview, setOverview] = useState<any>({});
   const [loading, setLoading] = useState(true);
-  const [showProvisionModal, setShowProvisionModal] = useState(false);
   const [selectedProject, setSelectedProject] = useState<number | null>(null);
 
   useEffect(() => {
@@ -48,7 +35,6 @@ const InfrastructureManagementPage: React.FC = () => {
         configuration
       });
       
-      setShowProvisionModal(false);
       fetchInfrastructureData();
     } catch (error) {
       console.error('Failed to provision resource:', error);
@@ -139,7 +125,7 @@ const InfrastructureManagementPage: React.FC = () => {
           <div className="flex items-center justify-between mb-6">
             <h2 className="text-xl font-semibold text-white">Provision New Resources</h2>
             <button
-              onClick={() => setShowProvisionModal(true)}
+              onClick={() => setSelectedProject(1)}
               className="flex items-center space-x-2 px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-colors"
             >
               <Plus className="h-4 w-4" />
@@ -153,7 +139,7 @@ const InfrastructureManagementPage: React.FC = () => {
                 key={resource.type}
                 className="bg-white/5 rounded-xl p-6 border border-white/10 hover:bg-white/10 transition-all cursor-pointer"
                 onClick={() => {
-                  setSelectedProject(1); // Mock project ID
+                  setSelectedProject(1);
                   handleProvisionResource(resource.type, {
                     instanceType: resource.type === 'ec2' ? 't3.micro' : undefined,
                     instanceClass: resource.type === 'rds' ? 'db.t3.micro' : undefined,

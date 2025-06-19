@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { GitBranch, Github, Gitlab, Play, Settings, CheckCircle, Loader2 } from 'lucide-react';
+import { GitBranch, Github, Gitlab, Play, CheckCircle, Loader2 } from 'lucide-react';
 import axios from 'axios';
 import { useAuth } from '../../contexts/AuthContext';
 
@@ -22,7 +22,7 @@ interface Pipeline {
 }
 
 const CICDSetupPage: React.FC = () => {
-  const { user, token } = useAuth();
+  const {token } = useAuth();
   const [step, setStep] = useState(1);
   const [repositories, setRepositories] = useState<Repository[]>([]);
   const [selectedRepo, setSelectedRepo] = useState<Repository | null>(null);
