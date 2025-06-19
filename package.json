@@ -15,8 +15,7 @@
     "test": "jest",
     "migrate": "node server/database/init.js",
     "backup": "node scripts/backup.js",
-    "security-check": "npm audit && snyk test",
-    //"prepare": "husky install"
+    "security-check": "npm audit && snyk test"
   },
   "dependencies": {
     "@aws-sdk/client-ec2": "^3.828.0",
