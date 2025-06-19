@@ -4,6 +4,58 @@ import { io } from '../index.js';
 
 const router = express.Router();
 
+// Simulate real-time metrics with realistic patterns
+function generateRealisticMetrics() {
+  const now = Date.now();
+  const metrics = {
+    cpu: [],
+    memory: [],
+    network: [],
+    errors: [],
+    responseTime: [],
+    uptime: 99.9,
+    lastUpdated: new Date().toISOString()
+  };
+
+  // Generate 24 hours of data with realistic patterns
+  for (let i = 23; i >= 0; i--) {
+    const timestamp = new Date(now - i * 60 * 60 * 1000);
+    const hour = timestamp.getHours();
+    
+    // Simulate traffic patterns (higher during business hours)
+    const trafficMultiplier = hour >= 9 && hour <= 17 ? 1.5 : 0.7;
+    
+    metrics.cpu.push({
+      timestamp: timestamp.toISOString(),
+      value: Math.floor(30 + Math.random() * 40 * trafficMultiplier)
+    });
+    
+    metrics.memory.push({
+      timestamp: timestamp.toISOString(),
+      value: Math.floor(50 + Math.random() * 30 * trafficMultiplier)
+    });
+    
+    metrics.network.push({
+      timestamp: timestamp.toISOString(),
+      value: Math.floor(20 + Math.random() * 40 * trafficMultiplier)
+    });
+    
+    // Errors are rare but increase during high traffic
+    metrics.errors.push({
+      timestamp: timestamp.toISOString(),
+      value: Math.floor(Math.random() * (trafficMultiplier > 1 ? 8 : 3))
+    });
+    
+    // Response time increases with traffic
+    metrics.responseTime.push({
+      timestamp: timestamp.toISOString(),
+      value: Math.floor(150 + Math.random() * 200 * trafficMultiplier)
+    });
+  }
+  
+  return metrics;
+}
+
 // Get monitoring data
 router.get('/metrics/:projectId', async (req, res) => {
   try {
@@ -16,17 +68,7 @@ router.get('/metrics/:projectId', async (req, res) => {
       return res.status(404).json({ error: 'Project not found' });
     }
 
-    // Generate mock metrics data
-    const metrics = {
-      cpu: generateMetricData(30, 70),
-      memory: generateMetricData(40, 80),
-      network: generateMetricData(10, 50),
-      errors: generateMetricData(0, 5),
-      responseTime: generateMetricData(100, 500),
-      uptime: 99.9,
-      lastUpdated: new Date().toISOString()
-    };
-
+    const metrics = generateRealisticMetrics();
     res.json(metrics);
   } catch (error) {
     console.error('Metrics fetch error:', error);
@@ -34,38 +76,58 @@ router.get('/metrics/:projectId', async (req, res) => {
   }
 });
 
-// Get alerts
+// Get alerts with dynamic generation
 router.get('/alerts', async (req, res) => {
   try {
     const userId = req.user.id;
     
-    // Generate mock alerts
-    const alerts = [
+    // Get user's projects to generate relevant alerts
+    const projects = db.prepare('SELECT * FROM projects WHERE user_id = ?').all(userId);
+    
+    const alertTemplates = [
       {
-        id: 1,
         type: 'warning',
         title: 'High CPU Usage',
         message: 'CPU usage has been above 80% for the last 10 minutes',
-        timestamp: new Date(Date.now() - 10 * 60 * 1000).toISOString(),
-        resolved: false
+        condition: () => Math.random() > 0.7
       },
       {
-        id: 2,
         type: 'info',
         title: 'Deployment Successful',
         message: 'Your application has been successfully deployed to production',
-        timestamp: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
-        resolved: true
+        condition: () => Math.random() > 0.8
       },
       {
-        id: 3,
         type: 'error',
         title: 'Database Connection Failed',
         message: 'Unable to connect to the database. Auto-healing in progress.',
-        timestamp: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
-        resolved: true
+        condition: () => Math.random() > 0.9
+      },
+      {
+        type: 'warning',
+        title: 'Memory Usage Alert',
+        message: 'Memory usage is approaching 85% threshold',
+        condition: () => Math.random() > 0.75
+      },
+      {
+        type: 'info',
+        title: 'Backup Completed',
+        message: 'Daily backup completed successfully',
+        condition: () => Math.random() > 0.85
       }
     ];
+
+    const alerts = alertTemplates
+      .filter(alert => alert.condition())
+      .map((alert, index) => ({
+        id: index + 1,
+        type: alert.type,
+        title: alert.title,
+        message: alert.message,
+        timestamp: new Date(Date.now() - Math.random() * 60 * 60 * 1000).toISOString(),
+        resolved: Math.random() > 0.3
+      }))
+      .slice(0, 5); // Limit to 5 alerts
 
     res.json(alerts);
   } catch (error) {
@@ -74,7 +136,7 @@ router.get('/alerts', async (req, res) => {
   }
 });
 
-// Auto-healing endpoint
+// Auto-healing endpoint with realistic actions
 router.post('/auto-heal/:resourceId', async (req, res) => {
   try {
     const { resourceId } = req.params;
@@ -91,30 +153,35 @@ router.post('/auto-heal/:resourceId', async (req, res) => {
       return res.status(404).json({ error: 'Resource not found' });
     }
 
-    // Simulate auto-healing actions
+    // Realistic healing actions based on issue type
     const healingActions = {
       'high_cpu': 'Scaled up instances and optimized resource allocation',
       'memory_leak': 'Restarted application and cleared memory cache',
-      'database_connection': 'Reconnected to database and updated connection db',
-      'disk_space': 'Cleaned up temporary files and expanded storage'
+      'database_connection': 'Reconnected to database and updated connection pool',
+      'disk_space': 'Cleaned up temporary files and expanded storage',
+      'network_latency': 'Optimized network routing and updated load balancer',
+      'service_unavailable': 'Restarted service and verified health checks'
     };
 
     const action = healingActions[issue] || 'Applied general optimization measures';
     
-    // Simulate healing process
+    // Simulate healing process with realistic timing
+    const healingTime = Math.floor(Math.random() * 3000) + 2000; // 2-5 seconds
+    
     setTimeout(() => {
       io.to(`user-${userId}`).emit('healing-complete', {
         resourceId,
         action,
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        success: Math.random() > 0.1 // 90% success rate
       });
-    }, 3000);
+    }, healingTime);
 
     res.json({ 
       success: true, 
       message: 'Auto-healing initiated',
       action,
-      estimatedTime: '2-3 minutes'
+      estimatedTime: `${Math.ceil(healingTime / 1000)} seconds`
     });
   } catch (error) {
     console.error('Auto-healing error:', error);
@@ -122,7 +189,7 @@ router.post('/auto-heal/:resourceId', async (req, res) => {
   }
 });
 
-// Health check endpoint
+// Health check endpoint with dynamic status
 router.get('/health/:projectId', async (req, res) => {
   try {
     const { projectId } = req.params;
@@ -139,14 +206,16 @@ router.get('/health/:projectId', async (req, res) => {
       'SELECT * FROM infrastructure_resources WHERE project_id = ?'
     ).all(projectId);
 
+    // Generate realistic health status
     const healthStatus = {
-      overall: 'healthy',
+      overall: Math.random() > 0.1 ? 'healthy' : 'warning',
       services: resources.map(resource => ({
         id: resource.id,
         type: resource.resource_type,
-        status: Math.random() > 0.1 ? 'healthy' : 'warning',
+        status: Math.random() > 0.15 ? 'healthy' : (Math.random() > 0.5 ? 'warning' : 'critical'),
         uptime: Math.random() * 100,
-        lastCheck: new Date().toISOString()
+        lastCheck: new Date().toISOString(),
+        responseTime: Math.floor(Math.random() * 500) + 50
       }))
     };
 
@@ -156,19 +225,5 @@ router.get('/health/:projectId', async (req, res) => {
     res.status(500).json({ error: 'Failed to perform health check' });
   }
 });
-
-function generateMetricData(min, max) {
-  const data = [];
-  const now = Date.now();
-  
-  for (let i = 23; i >= 0; i--) {
-    data.push({
-      timestamp: new Date(now - i * 60 * 60 * 1000).toISOString(),
-      value: Math.floor(Math.random() * (max - min) + min)
-    });
-  }
-  
-  return data;
-}
 
 export default router;

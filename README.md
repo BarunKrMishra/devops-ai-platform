@@ -90,7 +90,7 @@ A modern DevOps platform with AI-powered automation, CI/CD pipelines, infrastruc
 
 ## License
 
-MIT License - see LICENSE file for details
+License - see LICENSE file for details
 
 ## Support
 

@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { db } from '../database/init.js';
 import axios from 'axios';
+import { authenticateToken } from '../middleware/auth.js';
 
 const router = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';

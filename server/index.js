@@ -161,16 +161,16 @@ io.on('connection', (socket) => {
       next();
     }
   });
-
+  
   socket.on('join-room', (userId) => {
     if (socket.user.id === userId) {
-      socket.join(`user-${userId}`);
+    socket.join(`user-${userId}`);
     }
   });
 
   socket.on('join-org', (orgId) => {
     if (socket.user.organization_id === orgId) {
-      socket.join(`org-${orgId}`);
+    socket.join(`org-${orgId}`);
     }
   });
 
