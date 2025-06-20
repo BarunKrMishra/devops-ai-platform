@@ -63,10 +63,9 @@ export const initDatabase = async () => {
     `);
 
     // Create demo account if it doesn't exist
-    const demoUser = db.prepare('SELECT id FROM users WHERE email = ?').get('demo@devopsai.com');
+    const demoUser = db.prepare('SELECT id, two_factor_secret FROM users WHERE email = ?').get('demo@devopsai.com');
     if (!demoUser) {
       const passwordHash = await bcrypt.hash('demo123!@#', 10);
-      // Generate a TOTP secret for the demo user
       const secret = speakeasy.generateSecret({ name: 'DevOpsAI (demo@devopsai.com)' });
       db.prepare(
         'INSERT INTO users (email, password_hash, name, role, organization_id, permissions, two_factor_secret) VALUES (?, ?, ?, ?, ?, ?, ?)'
@@ -84,14 +83,10 @@ export const initDatabase = async () => {
         }),
         secret.base32
       );
-    } else {
-      // Ensure demo user has a two_factor_secret (migration for existing users)
-      const demoUserWithSecret = db.prepare('SELECT two_factor_secret FROM users WHERE email = ?').get('demo@devopsai.com');
-      if (!demoUserWithSecret.two_factor_secret) {
-        const secret = speakeasy.generateSecret({ name: 'DevOpsAI (demo@devopsai.com)' });
-        db.prepare('UPDATE users SET two_factor_secret = ? WHERE email = ?').run(secret.base32, 'demo@devopsai.com');
-        console.log('Updated demo user with two_factor_secret');
-      }
+    } else if (!demoUser.two_factor_secret) {
+      // If demo user exists but is missing a secret, add one
+      const secret = speakeasy.generateSecret({ name: 'DevOpsAI (demo@devopsai.com)' });
+      db.prepare('UPDATE users SET two_factor_secret = ? WHERE email = ?').run(secret.base32, 'demo@devopsai.com');
     }
 
     // Migration: Ensure all users have two_factor_secret
