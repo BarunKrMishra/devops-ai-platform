@@ -97,6 +97,20 @@ export const initDatabase = async () => {
       console.log(`Updated user ${user.email} with two_factor_secret`);
     }
 
+    // --- MIGRATION: Ensure all required columns exist in users table ---
+    const columns = db.prepare("PRAGMA table_info(users)").all();
+    const hasTwoFactorSecret = columns.some(col => col.name === 'two_factor_secret');
+    if (!hasTwoFactorSecret) {
+      db.exec('ALTER TABLE users ADD COLUMN two_factor_secret TEXT');
+    }
+    // Populate two_factor_secret for all users if missing or empty
+    const usersMissingSecret = db.prepare("SELECT id, email FROM users WHERE two_factor_secret IS NULL OR two_factor_secret = ''").all();
+    for (const user of usersMissingSecret) {
+      const secret = speakeasy.generateSecret({ name: `DevOpsAI (${user.email})` });
+      db.prepare('UPDATE users SET two_factor_secret = ? WHERE id = ?').run(secret.base32, user.id);
+    }
+    // --- END MIGRATION ---
+
     // Database migrations for existing tables
     try {
       // Check if two_factor_method column exists

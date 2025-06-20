@@ -20,7 +20,13 @@ const ForgotPasswordPage: React.FC = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email })
       });
-      const data = await res.json();
+      let data;
+      try {
+        data = await res.json();
+      } catch {
+        const text = await res.text();
+        throw new Error(text || 'Unexpected server error');
+      }
       if (!res.ok) throw new Error(data.error || 'Failed to send OTP');
       setSuccess('OTP sent to your email.');
       setStep(2);
@@ -42,7 +48,13 @@ const ForgotPasswordPage: React.FC = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, otp })
       });
-      const data = await res.json();
+      let data;
+      try {
+        data = await res.json();
+      } catch {
+        const text = await res.text();
+        throw new Error(text || 'Unexpected server error');
+      }
       if (!res.ok) throw new Error(data.error || 'Invalid OTP');
       setSuccess('OTP verified. Please enter your new password.');
       setStep(3);
@@ -64,7 +76,13 @@ const ForgotPasswordPage: React.FC = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, otp, newPassword })
       });
-      const data = await res.json();
+      let data;
+      try {
+        data = await res.json();
+      } catch {
+        const text = await res.text();
+        throw new Error(text || 'Unexpected server error');
+      }
       if (!res.ok) throw new Error(data.error || 'Failed to reset password');
       setSuccess('Password reset successful! You can now log in.');
       setStep(4);
