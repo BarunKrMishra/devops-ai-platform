@@ -315,32 +315,32 @@ async function processAICommand(command, userId) {
     const aiResponse = response.data[0].generated_text;
 
     // Process the response based on command type
-    const lowerCommand = command.toLowerCase();
-    if (lowerCommand.includes('deploy')) {
-      return {
+  const lowerCommand = command.toLowerCase();
+  if (lowerCommand.includes('deploy')) {
+    return {
         message: aiResponse || "I'll help you deploy your application. I can see you have projects ready. Would you like me to:\n\n• Deploy to AWS with auto-scaling\n• Set up CI/CD pipeline with GitHub Actions\n• Configure load balancing and SSL\n\nWhich project would you like to deploy?",
-        action: 'suggest_deployment',
-        success: true
-      };
-    } else if (lowerCommand.includes('scale')) {
-      return {
+      action: 'suggest_deployment',
+      success: true
+    };
+  } else if (lowerCommand.includes('scale')) {
+    return {
         message: aiResponse || "I can help optimize your scaling strategy. Based on your current traffic patterns, I recommend:\n\n• Enable auto-scaling for your instances\n• Set up monitoring alerts for CPU > 70%\n• Configure scale-down during low traffic hours\n\nThis could save you approximately 30% on compute costs.",
-        action: 'suggest_scaling',
-        success: true
-      };
+      action: 'suggest_scaling',
+      success: true
+    };
     } else if (lowerCommand.includes('cost')) {
-      return {
+    return {
         message: aiResponse || "I've analyzed your infrastructure costs. Here are my recommendations:\n\n• Switch to Reserved Instances (save $234/month)\n• Right-size your databases (save $89/month)\n• Enable automated shutdown for dev environments (save $156/month)\n\nTotal potential savings: $479/month. Should I implement these optimizations?",
-        action: 'suggest_cost_optimization',
-        success: true
-      };
-    } else if (lowerCommand.includes('monitor') || lowerCommand.includes('alert')) {
-      return {
+      action: 'suggest_cost_optimization',
+      success: true
+    };
+  } else if (lowerCommand.includes('monitor') || lowerCommand.includes('alert')) {
+    return {
         message: aiResponse || "I'll set up comprehensive monitoring for your applications:\n\n• CPU and memory usage alerts\n• Error rate monitoring\n• Response time tracking\n• Automated incident response\n\nWould you like me to configure these monitoring rules now?",
-        action: 'suggest_monitoring',
-        success: true
-      };
-    } else {
+      action: 'suggest_monitoring',
+      success: true
+    };
+  } else {
       return {
         message: aiResponse || "I understand you're looking for help with your DevOps workflow. I can assist with:\n\n• Application deployment and scaling\n• Infrastructure provisioning\n• Cost optimization\n• CI/CD pipeline setup\n• Monitoring and alerting\n\nCould you tell me more about what you'd like to achieve?",
         action: 'none',

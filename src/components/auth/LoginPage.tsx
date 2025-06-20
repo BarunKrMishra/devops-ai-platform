@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { Bot, Github, Mail, Lock, Eye, EyeOff } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 
 const LoginPage: React.FC = () => {
   const [isLogin, setIsLogin] = useState(true);
@@ -9,8 +10,14 @@ const LoginPage: React.FC = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [show2FA, setShow2FA] = useState(false);
+  const [twoFactorToken, setTwoFactorToken] = useState('');
+  const [twoFAMethod, setTwoFAMethod] = useState<'totp' | 'email' | null>(null);
+  const [info, setInfo] = useState('');
+  const [registrationStep, setRegistrationStep] = useState<'form' | 'otp'>('form');
   
   const { login, register, loginWithGitHub } = useAuth();
+  const navigate = useNavigate();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -41,12 +48,46 @@ const LoginPage: React.FC = () => {
 
     try {
       if (isLogin) {
-        await login(email, password);
+        await login(email, password, twoFactorToken);
       } else {
-        await register(email, password);
+        if (registrationStep === 'form') {
+          // First step: create pending user, send OTP
+          await register(email, password, 'developer');
+        } else {
+          // Second step: verify OTP and activate user
+          await register(email, password, 'developer', twoFactorToken);
+        }
       }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Authentication failed');
+    } catch (err: any) {
+      // Check for backend 2FA/OTP responses
+      if (
+        err.message &&
+        (err.message.includes('2FA required') ||
+          err.message.includes('OTP sent to email') ||
+          err.message.includes('OTP sent to email to complete registration'))
+      ) {
+        setShow2FA(true);
+        setRegistrationStep('otp');
+        // Try to detect method from error message or backend response
+        if (err.message.includes('email')) {
+          setTwoFAMethod('email');
+          setInfo('Enter the code sent to your email to complete registration.');
+        } else {
+          setTwoFAMethod('totp');
+          setInfo('Enter the code from your authenticator app.');
+        }
+        setError('');
+      } else if (
+        registrationStep === 'otp' &&
+        err.message &&
+        err.message.toLowerCase().includes('user already exists')
+      ) {
+        setError('Registration already completed or OTP expired. Please try logging in.');
+        setShow2FA(false);
+        setRegistrationStep('form');
+      } else {
+        setError(err instanceof Error ? err.message : 'Authentication failed');
+      }
     } finally {
       setLoading(false);
     }
@@ -137,13 +178,46 @@ const LoginPage: React.FC = () => {
               )}
             </div>
 
+            {show2FA && (
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-2">
+                  {twoFAMethod === 'email' ? 'Email OTP' : '2FA Code'}
+                </label>
+                <input
+                  type="text"
+                  value={twoFactorToken}
+                  onChange={e => setTwoFactorToken(e.target.value)}
+                  className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:border-purple-400 focus:outline-none"
+                  placeholder={twoFAMethod === 'email' ? 'Enter the code sent to your email' : 'Enter 2FA code'}
+                  required
+                />
+                {info && <div className="mt-2 text-sm text-blue-300">{info}</div>}
+              </div>
+            )}
+
             <button
               type="submit"
               disabled={loading}
               className="w-full py-3 bg-gradient-to-r from-purple-500 to-blue-500 text-white rounded-lg hover:from-purple-600 hover:to-blue-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {loading ? 'Processing...' : (isLogin ? 'Sign In' : 'Create Account')}
+              {loading ? 'Processing...' : (
+                isLogin ? 'Sign In' : (
+                  show2FA ? 'Complete Registration' : 'Create Account'
+                )
+              )}
             </button>
+
+            {isLogin && (
+              <div className="mt-2 text-right">
+                <button
+                  type="button"
+                  className="text-sm text-blue-300 hover:underline"
+                  onClick={() => navigate('/forgot-password')}
+                >
+                  Forgot Password?
+                </button>
+              </div>
+            )}
           </form>
 
           <div className="mt-6">

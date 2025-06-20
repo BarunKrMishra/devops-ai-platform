@@ -110,22 +110,22 @@ const CICDSetupPage: React.FC = () => {
 
   const handleCreatePipeline = async () => {
     if (!selectedRepo || !token) return;
-    
+
     setLoading(true);
     try {
       const response = await axios.post(
         `${import.meta.env.VITE_API_URL}/api/cicd/pipeline`,
         {
-          repositoryUrl: selectedRepo.html_url,
-          branch,
-          framework,
-          cloudProvider
+        repositoryUrl: selectedRepo.html_url,
+        branch,
+        framework,
+        cloudProvider
         },
         {
           headers: { Authorization: `Bearer ${token}` }
         }
       );
-      
+
       setPipelineConfig(JSON.stringify(response.data.pipelineConfig, null, 2));
       setStep(3);
       fetchPipelines();
@@ -164,10 +164,10 @@ const CICDSetupPage: React.FC = () => {
   return (
     <div className="pt-20 min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900">
       <div className="container mx-auto px-6 py-8">
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold text-white mb-2">CI/CD Pipeline Setup</h1>
+          <div className="mb-8">
+            <h1 className="text-3xl font-bold text-white mb-2">CI/CD Pipeline Setup</h1>
           <p className="text-gray-400">Configure and manage your deployment pipelines</p>
-        </div>
+          </div>
 
         {error && (
           <div className="mb-6 p-4 bg-red-500/20 border border-red-500/30 rounded-lg text-red-300 text-sm">
@@ -201,27 +201,27 @@ const CICDSetupPage: React.FC = () => {
                     <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-400"></div>
                   </div>
                 ) : repositories.length > 0 ? (
-                  <div className="space-y-4">
-                    {repositories.map((repo) => (
+                <div className="space-y-4">
+                  {repositories.map((repo) => (
                       <button
-                        key={repo.id}
+                      key={repo.id}
                         onClick={() => {
                           setSelectedRepo(repo);
                           setBranch(repo.default_branch);
                           setStep(2);
                         }}
                         className="w-full p-4 bg-gray-800/50 rounded-lg hover:bg-gray-700/50 transition-colors text-left"
-                      >
-                        <div className="flex items-center justify-between">
-                          <div>
+                    >
+                      <div className="flex items-center justify-between">
+                        <div>
                             <h3 className="text-white font-medium">{repo.name}</h3>
                             <p className="text-gray-400 text-sm">{repo.language}</p>
-                          </div>
+                        </div>
                           <GitBranch className="h-5 w-5 text-gray-400" />
                         </div>
                       </button>
-                    ))}
-                  </div>
+                  ))}
+                </div>
                 ) : (
                   <div className="text-center py-8">
                     <p className="text-gray-400">No repositories found. Connect your GitHub account to get started.</p>
@@ -233,7 +233,7 @@ const CICDSetupPage: React.FC = () => {
             {step === 2 && selectedRepo && (
               <div>
                 <h2 className="text-xl font-semibold text-white mb-6">Configure Pipeline</h2>
-                
+
                 <div className="space-y-6">
                   <div>
                     <label className="block text-sm font-medium text-gray-400 mb-2">
@@ -288,25 +288,25 @@ const CICDSetupPage: React.FC = () => {
                               : 'bg-gray-800/50 border-gray-700 hover:bg-gray-700/50'
                           }`}
                         >
-                          <div className="text-2xl mb-2">{provider.icon}</div>
+                            <div className="text-2xl mb-2">{provider.icon}</div>
                           <div className="text-white font-medium">{provider.name}</div>
                         </button>
                       ))}
-                    </div>
                   </div>
+                </div>
 
                   <div className="flex justify-end space-x-4">
-                    <button
-                      onClick={() => setStep(1)}
+                  <button
+                    onClick={() => setStep(1)}
                       className="px-4 py-2 text-gray-400 hover:text-white transition-colors"
-                    >
-                      Back
-                    </button>
-                    <button
-                      onClick={handleCreatePipeline}
-                      disabled={loading}
+                  >
+                    Back
+                  </button>
+                  <button
+                    onClick={handleCreatePipeline}
+                    disabled={loading}
                       className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
+                  >
                       {loading ? (
                         <div className="flex items-center space-x-2">
                           <Loader2 className="h-4 w-4 animate-spin" />
@@ -315,7 +315,7 @@ const CICDSetupPage: React.FC = () => {
                       ) : (
                         'Create Pipeline'
                       )}
-                    </button>
+                  </button>
                   </div>
                 </div>
               </div>
@@ -383,8 +383,8 @@ const CICDSetupPage: React.FC = () => {
                           <div className="animate-spin h-5 w-5 rounded-full border-b-2 border-purple-400" />
                         )}
                       </div>
-                    </div>
-                    
+                </div>
+
                     <div className="flex items-center justify-between">
                       <div className="flex items-center space-x-4">
                         <span className="px-2 py-1 bg-gray-700 rounded text-sm text-gray-300">
@@ -398,10 +398,10 @@ const CICDSetupPage: React.FC = () => {
                         onClick={() => handleDeploy(pipeline.id)}
                         className="flex items-center space-x-2 px-3 py-1 bg-purple-600 text-white rounded hover:bg-purple-700 transition-colors"
                       >
-                        <Play className="h-4 w-4" />
+                    <Play className="h-4 w-4" />
                         <span>Deploy</span>
-                      </button>
-                    </div>
+                  </button>
+                </div>
                   </div>
                 ))}
               </div>

@@ -2,6 +2,7 @@ import Database from 'better-sqlite3';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import bcrypt from 'bcrypt';
+import speakeasy from 'speakeasy';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -47,8 +48,11 @@ export const initDatabase = async () => {
         role TEXT DEFAULT 'developer',
         organization_id INTEGER DEFAULT 1,
         permissions TEXT DEFAULT '{}',
-        two_factor_enabled BOOLEAN DEFAULT 0,
-        two_factor_secret TEXT,
+        two_factor_enabled BOOLEAN DEFAULT 1,
+        two_factor_secret TEXT NOT NULL,
+        two_factor_method TEXT DEFAULT 'totp',
+        reset_otp TEXT,
+        otp_expiry DATETIME,
         last_login DATETIME,
         is_active BOOLEAN DEFAULT 1,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -62,8 +66,10 @@ export const initDatabase = async () => {
     const demoUser = db.prepare('SELECT id FROM users WHERE email = ?').get('demo@devopsai.com');
     if (!demoUser) {
       const passwordHash = await bcrypt.hash('demo123!@#', 10);
+      // Generate a TOTP secret for the demo user
+      const secret = speakeasy.generateSecret({ name: 'DevOpsAI (demo@devopsai.com)' });
       db.prepare(
-        'INSERT INTO users (email, password_hash, name, role, organization_id, permissions) VALUES (?, ?, ?, ?, ?, ?)'
+        'INSERT INTO users (email, password_hash, name, role, organization_id, permissions, two_factor_secret) VALUES (?, ?, ?, ?, ?, ?, ?)'
       ).run(
         'demo@devopsai.com',
         passwordHash,
@@ -75,8 +81,78 @@ export const initDatabase = async () => {
           canManageProjects: true,
           canManageTemplates: true,
           canViewAnalytics: true
-        })
+        }),
+        secret.base32
       );
+    } else {
+      // Ensure demo user has a two_factor_secret (migration for existing users)
+      const demoUserWithSecret = db.prepare('SELECT two_factor_secret FROM users WHERE email = ?').get('demo@devopsai.com');
+      if (!demoUserWithSecret.two_factor_secret) {
+        const secret = speakeasy.generateSecret({ name: 'DevOpsAI (demo@devopsai.com)' });
+        db.prepare('UPDATE users SET two_factor_secret = ? WHERE email = ?').run(secret.base32, 'demo@devopsai.com');
+        console.log('Updated demo user with two_factor_secret');
+      }
+    }
+
+    // Migration: Ensure all users have two_factor_secret
+    const usersWithoutSecret = db.prepare('SELECT id, email FROM users WHERE two_factor_secret IS NULL').all();
+    for (const user of usersWithoutSecret) {
+      const secret = speakeasy.generateSecret({ name: `DevOpsAI (${user.email})` });
+      db.prepare('UPDATE users SET two_factor_secret = ? WHERE id = ?').run(secret.base32, user.id);
+      console.log(`Updated user ${user.email} with two_factor_secret`);
+    }
+
+    // Database migrations for existing tables
+    try {
+      // Check if two_factor_method column exists
+      const columns = db.prepare("PRAGMA table_info(users)").all();
+      const hasTwoFactorMethod = columns.some(col => col.name === 'two_factor_method');
+      
+      if (!hasTwoFactorMethod) {
+        console.log('Adding two_factor_method column to users table...');
+        db.exec('ALTER TABLE users ADD COLUMN two_factor_method TEXT DEFAULT "totp"');
+      }
+      
+      // Check if other missing columns exist and add them
+      const hasTwoFactorEnabled = columns.some(col => col.name === 'two_factor_enabled');
+      if (!hasTwoFactorEnabled) {
+        console.log('Adding two_factor_enabled column to users table...');
+        db.exec('ALTER TABLE users ADD COLUMN two_factor_enabled BOOLEAN DEFAULT 1');
+      }
+      
+      const hasResetOtp = columns.some(col => col.name === 'reset_otp');
+      if (!hasResetOtp) {
+        console.log('Adding reset_otp column to users table...');
+        db.exec('ALTER TABLE users ADD COLUMN reset_otp TEXT');
+      }
+      
+      const hasOtpExpiry = columns.some(col => col.name === 'otp_expiry');
+      if (!hasOtpExpiry) {
+        console.log('Adding otp_expiry column to users table...');
+        db.exec('ALTER TABLE users ADD COLUMN otp_expiry DATETIME');
+      }
+      
+      const hasLastLogin = columns.some(col => col.name === 'last_login');
+      if (!hasLastLogin) {
+        console.log('Adding last_login column to users table...');
+        db.exec('ALTER TABLE users ADD COLUMN last_login DATETIME');
+      }
+      
+      const hasIsActive = columns.some(col => col.name === 'is_active');
+      if (!hasIsActive) {
+        console.log('Adding is_active column to users table...');
+        db.exec('ALTER TABLE users ADD COLUMN is_active BOOLEAN DEFAULT 1');
+      }
+      
+      const hasGithubToken = columns.some(col => col.name === 'github_token');
+      if (!hasGithubToken) {
+        console.log('Adding github_token column to users table...');
+        db.exec('ALTER TABLE users ADD COLUMN github_token TEXT');
+      }
+      
+      console.log('Database migrations completed successfully');
+    } catch (error) {
+      console.error('Migration error:', error);
     }
 
     // Templates table for deployment blueprints
@@ -323,6 +399,17 @@ export const initDatabase = async () => {
         unit TEXT NOT NULL,
         recorded_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (organization_id) REFERENCES organizations(id)
+      )
+    `);
+
+    // Login attempts table
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS login_attempts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        email TEXT,
+        success BOOLEAN,
+        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+        ip_address TEXT
       )
     `);
 

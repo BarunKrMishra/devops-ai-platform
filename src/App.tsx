@@ -15,6 +15,7 @@ import UserSettingsPage from './components/settings/UserSettingsPage';
 import TemplateGalleryPage from './components/templates/TemplateGalleryPage';
 import TeamCollaborationPage from './components/collaboration/TeamCollaborationPage';
 import PredictiveAnalyticsPage from './components/analytics/PredictiveAnalyticsPage';
+import ForgotPasswordPage from './components/auth/ForgotPasswordPage';
 
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user, loading } = useAuth();
@@ -151,6 +152,12 @@ function App() {
                 <PredictiveAnalyticsPage />
               </div>
             </ProtectedRoute>
+          } />
+
+          <Route path="/forgot-password" element={
+            <PublicRoute>
+              <ForgotPasswordPage />
+            </PublicRoute>
           } />
           
           <Route path="*" element={<Navigate to="/" />} />

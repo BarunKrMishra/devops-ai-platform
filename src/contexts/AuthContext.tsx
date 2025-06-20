@@ -20,8 +20,8 @@ interface User {
 interface AuthContextType {
   user: User | null;
   token: string | null;
-  login: (email: string, password: string) => Promise<void>;
-  register: (email: string, password: string, role?: string) => Promise<void>;
+  login: (email: string, password: string, twoFactorToken?: string) => Promise<void>;
+  register: (email: string, password: string, role?: string, twoFactorToken?: string) => Promise<void>;
   loginWithGitHub: (code: string) => Promise<void>;
   logout: () => void;
   loading: boolean;
@@ -64,30 +64,32 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setLoading(false);
   }, [token]);
 
-  const login = async (email: string, password: string) => {
+  const login = async (email: string, password: string, twoFactorToken?: string) => {
     try {
       const response = await axios.post(`${API_URL}/api/auth/login`, {
         email,
-        password
+        password,
+        ...(twoFactorToken ? { twoFactorToken } : {})
       });
-      
       const { token: newToken, user: userData } = response.data;
       setToken(newToken);
       setUser(userData);
       localStorage.setItem('token', newToken);
       axios.defaults.headers.common['Authorization'] = `Bearer ${newToken}`;
     } catch (error: any) {
+      console.error('Frontend login error:', error, error.response?.data);
       const message = error.response?.data?.error || 'Login failed';
       throw new Error(message);
     }
   };
 
-  const register = async (email: string, password: string, role = 'developer') => {
+  const register = async (email: string, password: string, role = 'developer', twoFactorToken?: string) => {
     try {
       const response = await axios.post(`${API_URL}/api/auth/register`, {
         email,
         password,
-        role
+        role,
+        ...(twoFactorToken ? { twoFactorToken } : {})
       });
       
       const { token: newToken, user: userData } = response.data;
