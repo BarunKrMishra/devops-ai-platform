@@ -20,14 +20,13 @@ const ForgotPasswordPage: React.FC = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email })
       });
-      let data;
+      let data = null;
       try {
         data = await res.json();
       } catch {
-        const text = await res.text();
-        throw new Error(text || 'Unexpected server error');
+        // If not JSON, set generic error
       }
-      if (!res.ok) throw new Error(data.error || 'Failed to send OTP');
+      if (!res.ok) throw new Error((data && data.error) || 'Unexpected server error');
       setSuccess('OTP sent to your email.');
       setStep(2);
     } catch (err: any) {
@@ -48,14 +47,13 @@ const ForgotPasswordPage: React.FC = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, otp })
       });
-      let data;
+      let data = null;
       try {
         data = await res.json();
       } catch {
-        const text = await res.text();
-        throw new Error(text || 'Unexpected server error');
+        // If not JSON, set generic error
       }
-      if (!res.ok) throw new Error(data.error || 'Invalid OTP');
+      if (!res.ok) throw new Error((data && data.error) || 'Unexpected server error');
       setSuccess('OTP verified. Please enter your new password.');
       setStep(3);
     } catch (err: any) {
@@ -76,14 +74,13 @@ const ForgotPasswordPage: React.FC = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, otp, newPassword })
       });
-      let data;
+      let data = null;
       try {
         data = await res.json();
       } catch {
-        const text = await res.text();
-        throw new Error(text || 'Unexpected server error');
+        // If not JSON, set generic error
       }
-      if (!res.ok) throw new Error(data.error || 'Failed to reset password');
+      if (!res.ok) throw new Error((data && data.error) || 'Unexpected server error');
       setSuccess('Password reset successful! You can now log in.');
       setStep(4);
     } catch (err: any) {
