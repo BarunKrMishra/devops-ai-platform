@@ -16,6 +16,8 @@ const ForgotPasswordPage: React.FC = () => {
     setSuccess('');
     
     console.log('Sending OTP request for email:', email);
+    console.log('Current window location:', window.location.href);
+    console.log('API URL being used:', '/api/auth/request-password-reset');
     
     // First, test if the API is reachable
     try {
@@ -39,13 +41,34 @@ const ForgotPasswordPage: React.FC = () => {
       console.log('Response headers:', Object.fromEntries(res.headers.entries()));
       
       let data = null;
+      let responseText = '';
       try {
-        const responseText = await res.text();
+        responseText = await res.text();
         console.log('Response text:', responseText);
+        console.log('Response text length:', responseText.length);
+        console.log('Response text type:', typeof responseText);
+        
+        // Check if response is empty
+        if (!responseText || responseText.trim() === '') {
+          throw new Error('Server returned empty response');
+        }
+        
+        // Try to parse JSON
         data = JSON.parse(responseText);
-      } catch (parseError) {
+        console.log('Successfully parsed JSON:', data);
+      } catch (parseError: any) {
         console.error('Failed to parse JSON response:', parseError);
-        throw new Error('Server returned invalid response format');
+        console.error('Response text that failed to parse:', responseText);
+        console.error('Response headers:', Object.fromEntries(res.headers.entries()));
+        
+        // Try to provide more helpful error message
+        if (responseText && responseText.includes('<!DOCTYPE html>')) {
+          throw new Error('Server returned HTML instead of JSON. This usually means the server is not running or there is a routing issue.');
+        } else if (responseText && responseText.includes('Cannot GET') || responseText.includes('Cannot POST')) {
+          throw new Error('API endpoint not found. Please check if the server is running correctly.');
+        } else {
+          throw new Error(`Server returned invalid response format: ${parseError.message}`);
+        }
       }
       
       if (!res.ok) {
@@ -161,23 +184,44 @@ const ForgotPasswordPage: React.FC = () => {
               
               {/* Test button in development */}
               {process.env.NODE_ENV === 'development' && (
-                <button 
-                  type="button" 
-                  onClick={async () => {
-                    try {
-                      const res = await fetch('/api/health');
-                      const data = await res.json();
-                      console.log('Health check result:', data);
-                      alert(`Health check: ${res.status} - ${JSON.stringify(data, null, 2)}`);
-                    } catch (err: any) {
-                      console.error('Health check failed:', err);
-                      alert(`Health check failed: ${err.message}`);
-                    }
-                  }}
-                  className="w-full py-2 bg-yellow-500/20 border border-yellow-500/30 rounded text-yellow-300 text-sm mb-2"
-                >
-                  Test API Connection
-                </button>
+                <div className="space-y-2">
+                  <button 
+                    type="button" 
+                    onClick={async () => {
+                      try {
+                        const res = await fetch('/api/health');
+                        const data = await res.json();
+                        console.log('Health check result:', data);
+                        alert(`Health check: ${res.status} - ${JSON.stringify(data, null, 2)}`);
+                      } catch (err: any) {
+                        console.error('Health check failed:', err);
+                        alert(`Health check failed: ${err.message}`);
+                      }
+                    }}
+                    className="w-full py-2 bg-yellow-500/20 border border-yellow-500/30 rounded text-yellow-300 text-sm"
+                  >
+                    Test API Connection
+                  </button>
+                  
+                  <button 
+                    type="button" 
+                    onClick={async () => {
+                      try {
+                        console.log('Testing direct fetch to backend...');
+                        const res = await fetch('http://localhost:3001/api/health');
+                        const data = await res.json();
+                        console.log('Direct health check result:', data);
+                        alert(`Direct health check: ${res.status} - ${JSON.stringify(data, null, 2)}`);
+                      } catch (err: any) {
+                        console.error('Direct health check failed:', err);
+                        alert(`Direct health check failed: ${err.message}`);
+                      }
+                    }}
+                    className="w-full py-2 bg-orange-500/20 border border-orange-500/30 rounded text-orange-300 text-sm"
+                  >
+                    Test Direct Backend
+                  </button>
+                </div>
               )}
               
               <button type="submit" disabled={loading} className="w-full py-3 bg-gradient-to-r from-purple-500 to-blue-500 text-white rounded-lg hover:from-purple-600 hover:to-blue-600 transition-all disabled:opacity-50">
