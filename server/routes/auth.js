@@ -18,13 +18,55 @@ const NODE_ENV = process.env.NODE_ENV || 'development';
 const ALLOWED_ROLES = ['developer', 'manager', 'user'];
 
 // Email transporter setup (use environment variables in production)
-const transporter = nodemailer.createTransport({
-  service: 'gmail',
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS
+let transporter = null;
+
+// Check if email credentials are available
+if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
+  transporter = nodemailer.createTransporter({
+    service: 'gmail',
+    auth: {
+      user: process.env.EMAIL_USER,
+      pass: process.env.EMAIL_PASS
+    }
+  });
+  
+  // Verify transporter configuration
+  transporter.verify(function(error, success) {
+    if (error) {
+      console.error('Email transporter verification failed:', error);
+      transporter = null;
+    } else {
+      console.log('Email transporter is ready to send messages');
+    }
+  });
+} else {
+  console.warn('Email credentials not configured. Email functionality will be disabled.');
+  console.warn('Set EMAIL_USER and EMAIL_PASS environment variables to enable email features.');
+}
+
+// Helper function to send email with fallback
+async function sendEmailWithFallback(emailOptions) {
+  if (!transporter) {
+    console.log('Email not sent - transporter not configured. Email options:', emailOptions);
+    // In development, just log the OTP instead of sending email
+    if (NODE_ENV === 'development') {
+      console.log(`[DEV MODE] Email would be sent to ${emailOptions.to}:`);
+      console.log(`[DEV MODE] Subject: ${emailOptions.subject}`);
+      console.log(`[DEV MODE] Body: ${emailOptions.text}`);
+      return { success: true, devMode: true };
+    }
+    throw new Error('Email service not configured');
   }
-});
+  
+  try {
+    const result = await transporter.sendMail(emailOptions);
+    console.log('Email sent successfully:', result.messageId);
+    return { success: true, messageId: result.messageId };
+  } catch (error) {
+    console.error('Email sending failed:', error);
+    throw error;
+  }
+}
 
 // Utility function to log user contact
 function logUserContact(email, action) {
@@ -96,17 +138,28 @@ router.post('/register', async (req, res) => {
       console.log(`Generated registration OTP for ${email}: ${otp}`); // Log OTP for debugging
       
       try {
-        await transporter.sendMail({
+        await sendEmailWithFallback({
           from: process.env.EMAIL_USER,
           to: email,
           subject: 'Complete Your Registration - OTP Required',
           text: `Your registration OTP is: ${otp}. It expires in 10 minutes. Please enter this code to complete your account setup.`
         });
       } catch (e) {
-        console.error('Nodemailer error:', e);
+        console.error('Email sending error:', e);
         // Clean up temporary user if email fails
         db.prepare('DELETE FROM users WHERE id = ?').run(tempUserId);
-        return res.status(500).json({ error: 'Failed to send OTP email', method: 'email' });
+        
+        if (e.message === 'Email service not configured') {
+          return res.status(500).json({ 
+            error: 'Email service not configured. Please contact administrator.',
+            details: 'Email credentials are missing from environment variables.'
+          });
+        }
+        
+        return res.status(500).json({ 
+          error: 'Failed to send OTP email. Please try again later.',
+          details: e.message 
+        });
       }
 
       return res.status(403).json({ 
@@ -242,7 +295,7 @@ router.post('/login', async (req, res) => {
       db.prepare('UPDATE users SET reset_otp = ?, otp_expiry = ? WHERE id = ?').run(otp, expiry, user.id);
       console.log(`Generated OTP for ${email}: ${otp}`); // Log OTP for debugging
       try {
-        await transporter.sendMail({
+        await sendEmailWithFallback({
           from: process.env.EMAIL_USER,
           to: email,
           subject: 'Your Login OTP',
@@ -477,7 +530,7 @@ router.post('/request-password-reset', async (req, res) => {
   db.prepare('UPDATE users SET reset_otp = ?, otp_expiry = ? WHERE id = ?').run(otp, expiry, user.id);
   // Send OTP email
   try {
-    await transporter.sendMail({
+    await sendEmailWithFallback({
       from: process.env.EMAIL_USER,
       to: email,
       subject: 'Your Password Reset OTP',
@@ -485,8 +538,19 @@ router.post('/request-password-reset', async (req, res) => {
     });
     res.json({ message: 'OTP sent to email' });
   } catch (e) {
-    console.error('Nodemailer error:', e);
-    res.status(500).json({ error: 'Failed to send email' });
+    console.error('Email sending error:', e);
+    
+    if (e.message === 'Email service not configured') {
+      return res.status(500).json({ 
+        error: 'Email service not configured. Please contact administrator.',
+        details: 'Email credentials are missing from environment variables.'
+      });
+    }
+    
+    res.status(500).json({ 
+      error: 'Failed to send email. Please try again later.',
+      details: e.message 
+    });
   }
 });
 
