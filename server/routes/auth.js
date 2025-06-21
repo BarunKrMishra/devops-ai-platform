@@ -521,35 +521,80 @@ router.post('/github/disconnect', authenticateToken, async (req, res) => {
 
 // Request password reset (send OTP)
 router.post('/request-password-reset', async (req, res) => {
-  const { email } = req.body;
-  if (!email) return res.status(400).json({ error: 'Email required' });
-  const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
-  if (!user) return res.status(404).json({ error: 'User not found' });
-  const otp = (Math.floor(100000 + Math.random() * 900000)).toString();
-  const expiry = new Date(Date.now() + 10 * 60 * 1000).toISOString(); // 10 min
-  db.prepare('UPDATE users SET reset_otp = ?, otp_expiry = ? WHERE id = ?').run(otp, expiry, user.id);
-  // Send OTP email
   try {
-    await sendEmailWithFallback({
-      from: process.env.EMAIL_USER,
-      to: email,
-      subject: 'Your Password Reset OTP',
-      text: `Your OTP is: ${otp}. It expires in 10 minutes.`
-    });
-    res.json({ message: 'OTP sent to email' });
-  } catch (e) {
-    console.error('Email sending error:', e);
+    console.log('Password reset request received for:', req.body.email);
     
-    if (e.message === 'Email service not configured') {
-      return res.status(500).json({ 
-        error: 'Email service not configured. Please contact administrator.',
-        details: 'Email credentials are missing from environment variables.'
-      });
+    const { email } = req.body;
+    if (!email) {
+      console.log('No email provided in request');
+      return res.status(400).json({ error: 'Email required' });
     }
     
+    const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
+    if (!user) {
+      console.log('User not found for email:', email);
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    console.log('User found, generating OTP for:', email);
+    const otp = (Math.floor(100000 + Math.random() * 900000)).toString();
+    const expiry = new Date(Date.now() + 10 * 60 * 1000).toISOString(); // 10 min
+    
+    // Update user with OTP
+    db.prepare('UPDATE users SET reset_otp = ?, otp_expiry = ? WHERE id = ?').run(otp, expiry, user.id);
+    console.log('OTP generated and stored for user:', email, 'OTP:', otp);
+    
+    // Send OTP email
+    try {
+      const emailResult = await sendEmailWithFallback({
+        from: process.env.EMAIL_USER || 'noreply@devopsai.com',
+        to: email,
+        subject: 'Your Password Reset OTP',
+        text: `Your OTP is: ${otp}. It expires in 10 minutes.`
+      });
+      
+      console.log('Email sending result:', emailResult);
+      
+      if (emailResult.devMode) {
+        // In development mode, return success with OTP in response
+        res.json({ 
+          message: 'OTP sent to email (dev mode)',
+          devOtp: otp,
+          devMode: true
+        });
+      } else {
+        res.json({ message: 'OTP sent to email' });
+      }
+    } catch (emailError) {
+      console.error('Email sending error:', emailError);
+      
+      if (emailError.message === 'Email service not configured') {
+        // In production, this should be an error, but in dev we can still proceed
+        if (NODE_ENV === 'development') {
+          return res.json({ 
+            message: 'OTP generated (email not configured)',
+            devOtp: otp,
+            devMode: true,
+            warning: 'Email service not configured'
+          });
+        } else {
+          return res.status(500).json({ 
+            error: 'Email service not configured. Please contact administrator.',
+            details: 'Email credentials are missing from environment variables.'
+          });
+        }
+      }
+      
+      res.status(500).json({ 
+        error: 'Failed to send email. Please try again later.',
+        details: emailError.message 
+      });
+    }
+  } catch (error) {
+    console.error('Unexpected error in request-password-reset:', error);
     res.status(500).json({ 
-      error: 'Failed to send email. Please try again later.',
-      details: e.message 
+      error: 'An unexpected error occurred. Please try again.',
+      details: error.message 
     });
   }
 });

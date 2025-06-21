@@ -14,22 +14,55 @@ const ForgotPasswordPage: React.FC = () => {
     setLoading(true);
     setError('');
     setSuccess('');
+    
+    console.log('Sending OTP request for email:', email);
+    
+    // First, test if the API is reachable
+    try {
+      const healthCheck = await fetch('/api/health');
+      console.log('Health check status:', healthCheck.status);
+    } catch (healthError) {
+      console.error('Health check failed:', healthError);
+      setError('Cannot connect to server. Please check your connection.');
+      setLoading(false);
+      return;
+    }
+    
     try {
       const res = await fetch('/api/auth/request-password-reset', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email })
       });
+      
+      console.log('Response status:', res.status);
+      console.log('Response headers:', Object.fromEntries(res.headers.entries()));
+      
       let data = null;
       try {
-        data = await res.json();
-      } catch {
-        // If not JSON, set generic error
+        const responseText = await res.text();
+        console.log('Response text:', responseText);
+        data = JSON.parse(responseText);
+      } catch (parseError) {
+        console.error('Failed to parse JSON response:', parseError);
+        throw new Error('Server returned invalid response format');
       }
-      if (!res.ok) throw new Error((data && data.error) || 'Unexpected server error');
-      setSuccess('OTP sent to your email.');
+      
+      if (!res.ok) {
+        console.error('Server error response:', data);
+        throw new Error((data && data.error) || 'Unexpected server error');
+      }
+      
+      console.log('Success response:', data);
+      
+      if (data.devMode && data.devOtp) {
+        setSuccess(`OTP sent to your email. (Dev mode OTP: ${data.devOtp})`);
+      } else {
+        setSuccess('OTP sent to your email.');
+      }
       setStep(2);
     } catch (err: any) {
+      console.error('Error in handleRequestOtp:', err);
       setError(err.message);
     } finally {
       setLoading(false);
@@ -95,6 +128,20 @@ const ForgotPasswordPage: React.FC = () => {
       <div className="max-w-md w-full">
         <div className="bg-white/10 backdrop-blur-md rounded-2xl border border-white/20 p-8">
           <h2 className="text-2xl font-bold text-white mb-6 text-center">Forgot Password</h2>
+          
+          {/* Debug info in development */}
+          {process.env.NODE_ENV === 'development' && (
+            <div className="mb-4 p-3 bg-blue-500/20 border border-blue-500/30 rounded text-blue-300 text-xs">
+              <div>Debug Info:</div>
+              <div>Step: {step}</div>
+              <div>Loading: {loading ? 'Yes' : 'No'}</div>
+              <div>Email: {email}</div>
+              <div>NODE_ENV: {process.env.NODE_ENV}</div>
+              <div>VITE_API_URL: {process.env.VITE_API_URL || 'Not set'}</div>
+              <div>Current URL: {window.location.href}</div>
+            </div>
+          )}
+          
           {error && <div className="mb-4 p-3 bg-red-500/20 border border-red-500/30 rounded text-red-300 text-sm">{error}</div>}
           {success && <div className="mb-4 p-3 bg-green-500/20 border border-green-500/30 rounded text-green-300 text-sm">{success}</div>}
 
@@ -111,6 +158,28 @@ const ForgotPasswordPage: React.FC = () => {
                   required
                 />
               </div>
+              
+              {/* Test button in development */}
+              {process.env.NODE_ENV === 'development' && (
+                <button 
+                  type="button" 
+                  onClick={async () => {
+                    try {
+                      const res = await fetch('/api/health');
+                      const data = await res.json();
+                      console.log('Health check result:', data);
+                      alert(`Health check: ${res.status} - ${JSON.stringify(data, null, 2)}`);
+                    } catch (err: any) {
+                      console.error('Health check failed:', err);
+                      alert(`Health check failed: ${err.message}`);
+                    }
+                  }}
+                  className="w-full py-2 bg-yellow-500/20 border border-yellow-500/30 rounded text-yellow-300 text-sm mb-2"
+                >
+                  Test API Connection
+                </button>
+              )}
+              
               <button type="submit" disabled={loading} className="w-full py-3 bg-gradient-to-r from-purple-500 to-blue-500 text-white rounded-lg hover:from-purple-600 hover:to-blue-600 transition-all disabled:opacity-50">
                 {loading ? 'Sending OTP...' : 'Send OTP'}
               </button>
