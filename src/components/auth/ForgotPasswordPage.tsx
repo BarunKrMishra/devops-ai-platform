@@ -9,19 +9,34 @@ const ForgotPasswordPage: React.FC = () => {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
+  // Helper function to get API base URL
+  const getApiBaseUrl = () => {
+    return process.env.NODE_ENV === 'production' 
+      ? (process.env.VITE_API_URL || 'https://your-backend-url.onrender.com')
+      : '';
+  };
+
   const handleRequestOtp = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError('');
     setSuccess('');
     
+    // Get the API base URL from environment variables or use relative path for development
+    const apiBaseUrl = getApiBaseUrl();
+    
+    const apiUrl = `${apiBaseUrl}/api/auth/request-password-reset`;
+    
     console.log('Sending OTP request for email:', email);
     console.log('Current window location:', window.location.href);
-    console.log('API URL being used:', '/api/auth/request-password-reset');
+    console.log('API URL being used:', apiUrl);
+    console.log('Environment:', process.env.NODE_ENV);
+    console.log('VITE_API_URL:', process.env.VITE_API_URL);
     
     // First, test if the API is reachable
     try {
-      const healthCheck = await fetch('/api/health');
+      const healthUrl = `${apiBaseUrl}/api/health`;
+      const healthCheck = await fetch(healthUrl);
       console.log('Health check status:', healthCheck.status);
     } catch (healthError) {
       console.error('Health check failed:', healthError);
@@ -31,7 +46,7 @@ const ForgotPasswordPage: React.FC = () => {
     }
     
     try {
-      const res = await fetch('/api/auth/request-password-reset', {
+      const res = await fetch(apiUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email })
@@ -97,8 +112,13 @@ const ForgotPasswordPage: React.FC = () => {
     setLoading(true);
     setError('');
     setSuccess('');
+    
+    const apiBaseUrl = getApiBaseUrl();
+    
+    const apiUrl = `${apiBaseUrl}/api/auth/verify-otp`;
+    
     try {
-      const res = await fetch('/api/auth/verify-otp', {
+      const res = await fetch(apiUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, otp })
@@ -124,8 +144,13 @@ const ForgotPasswordPage: React.FC = () => {
     setLoading(true);
     setError('');
     setSuccess('');
+    
+    const apiBaseUrl = getApiBaseUrl();
+    
+    const apiUrl = `${apiBaseUrl}/api/auth/reset-password`;
+    
     try {
-      const res = await fetch('/api/auth/reset-password', {
+      const res = await fetch(apiUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, otp, newPassword })
@@ -189,7 +214,9 @@ const ForgotPasswordPage: React.FC = () => {
                     type="button" 
                     onClick={async () => {
                       try {
-                        const res = await fetch('/api/health');
+                        const apiBaseUrl = getApiBaseUrl();
+                        const healthUrl = `${apiBaseUrl}/api/health`;
+                        const res = await fetch(healthUrl);
                         const data = await res.json();
                         console.log('Health check result:', data);
                         alert(`Health check: ${res.status} - ${JSON.stringify(data, null, 2)}`);
@@ -280,4 +307,4 @@ const ForgotPasswordPage: React.FC = () => {
   );
 };
 
-export default ForgotPasswordPage; 
+export default ForgotPasswordPage;

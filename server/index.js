@@ -26,7 +26,27 @@ import { initDatabase } from './database/init.js';
 // Environment variables
 const NODE_ENV = process.env.NODE_ENV || 'development';
 const PORT = process.env.PORT || 3001;
-const CORS_ORIGIN = process.env.CORS_ORIGIN || ['http://localhost:5173', 'http://localhost:5174'];
+
+// CORS configuration - handle both string and array formats
+let CORS_ORIGIN = process.env.CORS_ORIGIN || ['http://localhost:5173', 'http://localhost:5174'];
+if (typeof CORS_ORIGIN === 'string') {
+  // If CORS_ORIGIN is a string, split by comma for multiple origins
+  CORS_ORIGIN = CORS_ORIGIN.split(',').map(origin => origin.trim());
+}
+
+// Add common Netlify domains if not already included
+const commonNetlifyDomains = [
+  'https://*.netlify.app',
+  'https://*.netlify.com'
+];
+
+// Only add Netlify domains if we're in production and they're not already included
+if (NODE_ENV === 'production' && !CORS_ORIGIN.some(origin => origin.includes('netlify'))) {
+  CORS_ORIGIN = [...CORS_ORIGIN, ...commonNetlifyDomains];
+}
+
+console.log('CORS Origins configured:', CORS_ORIGIN);
+
 const RATE_LIMIT_WINDOW_MS = process.env.RATE_LIMIT_WINDOW_MS || 15 * 60 * 1000; // 15 minutes
 const RATE_LIMIT_MAX = process.env.RATE_LIMIT_MAX || 100; // Limit each IP to 100 requests per windowMs
 

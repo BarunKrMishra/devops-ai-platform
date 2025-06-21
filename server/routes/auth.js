@@ -125,7 +125,7 @@ router.post('/register', async (req, res) => {
     // If no 2FA token provided, create temporary user and send OTP
     if (!twoFactorToken) {
       // Create temporary user with pending status
-      const result = db.prepare(
+    const result = db.prepare(
         'INSERT INTO users (email, password_hash, role, organization_id, two_factor_enabled, two_factor_secret, two_factor_method, is_active) VALUES (?, ?, ?, ?, 1, ?, ?, 0)' // is_active = 0 for pending verification
       ).run(email, passwordHash, role, 1, secret ? secret.base32 : null, twoFactorMethod);
 

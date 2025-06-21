@@ -13,6 +13,7 @@
     "preview": "vite preview",
     "start": "NODE_ENV=production node server/index.js",
     "test": "jest",
+    "test-deployment": "node scripts/test-deployment.js",
     "migrate": "node server/database/init.js",
     "backup": "node scripts/backup.js",
     "security-check": "npm audit && snyk test"
@@ -36,6 +37,7 @@
     "jsonwebtoken": "^9.0.2",
     "lucide-react": "^0.460.0",
     "multer": "^1.4.5-lts.1",
+    "node-fetch": "^3.3.2",
     "nodemailer": "^6.10.1",
     "qrcode": "^1.5.4",
     "react": "^18.3.1",
