@@ -34,7 +34,7 @@ You can also use other email services by modifying the transporter configuration
 
 ```javascript
 // For Outlook/Hotmail
-transporter = nodemailer.createTransporter({
+transporter = nodemailer.createTransport({
   service: 'outlook',
   auth: {
     user: process.env.EMAIL_USER,
@@ -43,7 +43,7 @@ transporter = nodemailer.createTransporter({
 });
 
 // For custom SMTP
-transporter = nodemailer.createTransporter({
+transporter = nodemailer.createTransport({
   host: 'smtp.your-provider.com',
   port: 587,
   secure: false,
@@ -64,7 +64,7 @@ For production applications, consider using dedicated email services:
 
 Example SendGrid configuration:
 ```javascript
-transporter = nodemailer.createTransporter({
+transporter = nodemailer.createTransport({
   host: 'smtp.sendgrid.net',
   port: 587,
   secure: false,
