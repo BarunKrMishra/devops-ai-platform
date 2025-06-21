@@ -2,6 +2,7 @@ import express from 'express';
 import { db } from '../database/init.js';
 import { requireRole } from '../middleware/auth.js';
 import { logAuditAction } from '../utils/audit.js';
+import speakeasy from 'speakeasy';
 
 const router = express.Router();
 
@@ -96,10 +97,11 @@ router.post('/invite', requireRole(['admin']), async (req, res) => {
     const inviteToken = Math.random().toString(36).substring(2, 15);
     
     // For demo, create user directly
+    const secret = speakeasy.generateSecret({ name: `DevOpsAI (${email})` });
     const result = db.prepare(`
-      INSERT INTO users (email, role, organization_id, is_active)
-      VALUES (?, ?, ?, 0)
-    `).run(email, role, organizationId);
+      INSERT INTO users (email, role, organization_id, is_active, two_factor_secret)
+      VALUES (?, ?, ?, 0, ?)
+    `).run(email, role, organizationId, secret.base32);
 
     await logAuditAction(userId, 'INVITE_USER', 'user', result.lastInsertRowid, {
       email,

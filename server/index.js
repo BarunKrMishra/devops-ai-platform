@@ -52,6 +52,9 @@ if (NODE_ENV !== 'production') {
 const app = express();
 const server = createServer(app);
 
+// Trust proxy for rate limiting behind reverse proxy (Render, etc.)
+app.set('trust proxy', 1);
+
 // Configure Socket.IO with security measures
 const io = new Server(server, {
   cors: {

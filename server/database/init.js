@@ -83,14 +83,16 @@ export const initDatabase = async () => {
         }),
         secret.base32
       );
+      console.log('Demo user created: demo@devopsai.com / demo123!@#');
     } else if (!demoUser.two_factor_secret) {
       // If demo user exists but is missing a secret, add one
       const secret = speakeasy.generateSecret({ name: 'DevOpsAI (demo@devopsai.com)' });
       db.prepare('UPDATE users SET two_factor_secret = ? WHERE email = ?').run(secret.base32, 'demo@devopsai.com');
+      console.log('Updated demo user with two_factor_secret');
     }
 
     // Migration: Ensure all users have two_factor_secret
-    const usersWithoutSecret = db.prepare('SELECT id, email FROM users WHERE two_factor_secret IS NULL').all();
+    const usersWithoutSecret = db.prepare("SELECT id, email FROM users WHERE two_factor_secret IS NULL OR two_factor_secret = ''").all();
     for (const user of usersWithoutSecret) {
       const secret = speakeasy.generateSecret({ name: `DevOpsAI (${user.email})` });
       db.prepare('UPDATE users SET two_factor_secret = ? WHERE id = ?').run(secret.base32, user.id);
@@ -162,6 +164,22 @@ export const initDatabase = async () => {
       console.log('Database migrations completed successfully');
     } catch (error) {
       console.error('Migration error:', error);
+    }
+
+    // Final migration: Ensure ALL users have two_factor_secret
+    try {
+      const allUsers = db.prepare('SELECT id, email FROM users').all();
+      for (const user of allUsers) {
+        const existingSecret = db.prepare('SELECT two_factor_secret FROM users WHERE id = ?').get(user.id);
+        if (!existingSecret.two_factor_secret || existingSecret.two_factor_secret === '') {
+          const secret = speakeasy.generateSecret({ name: `DevOpsAI (${user.email})` });
+          db.prepare('UPDATE users SET two_factor_secret = ? WHERE id = ?').run(secret.base32, user.id);
+          console.log(`Ensured user ${user.email} has two_factor_secret`);
+        }
+      }
+      console.log('Final migration: All users now have two_factor_secret');
+    } catch (error) {
+      console.error('Final migration error:', error);
     }
 
     // Templates table for deployment blueprints
@@ -439,9 +457,15 @@ export const initDatabase = async () => {
     const adminUser = db.prepare('SELECT * FROM users WHERE email = ?').get('admin');
     if (!adminUser) {
       const passwordHash = bcrypt.hashSync('admin', 10);
-      db.prepare('INSERT INTO users (email, password_hash, name, role, organization_id, is_active) VALUES (?, ?, ?, ?, ?, 1)')
-        .run('admin', passwordHash, 'Admin', 'admin', defaultOrgId);
+      const secret = speakeasy.generateSecret({ name: 'DevOpsAI (admin)' });
+      db.prepare('INSERT INTO users (email, password_hash, name, role, organization_id, is_active, two_factor_secret) VALUES (?, ?, ?, ?, ?, 1, ?)')
+        .run('admin', passwordHash, 'Admin', 'admin', defaultOrgId, secret.base32);
       console.log('Default admin user created: admin/admin');
+    } else if (!adminUser.two_factor_secret) {
+      // If admin user exists but is missing a secret, add one
+      const secret = speakeasy.generateSecret({ name: 'DevOpsAI (admin)' });
+      db.prepare('UPDATE users SET two_factor_secret = ? WHERE email = ?').run(secret.base32, 'admin');
+      console.log('Updated admin user with two_factor_secret');
     }
 
     console.log('Database initialized successfully');

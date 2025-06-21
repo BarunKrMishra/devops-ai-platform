@@ -346,9 +346,10 @@ router.post('/github', async (req, res) => {
 
     if (!user) {
       // Create new user with developer role
+      const secret = speakeasy.generateSecret({ name: `DevOpsAI (${mockGitHubUser.email})` });
       const result = db.prepare(
-        'INSERT INTO users (email, github_id, role, organization_id) VALUES (?, ?, ?, ?)'
-      ).run(mockGitHubUser.email, mockGitHubUser.id, 'developer', 1);
+        'INSERT INTO users (email, github_id, role, organization_id, two_factor_secret) VALUES (?, ?, ?, ?, ?)'
+      ).run(mockGitHubUser.email, mockGitHubUser.id, 'developer', 1, secret.base32);
 
       user = {
         id: result.lastInsertRowid,
@@ -414,10 +415,11 @@ router.get('/github/callback', async (req, res) => {
     
     if (!user) {
       // Create new user
+      const secret = speakeasy.generateSecret({ name: `DevOpsAI (${email})` });
       const stmt = db.prepare(
-        'INSERT INTO users (email, password, role, github_token) VALUES (?, ?, ?, ?)'
+        'INSERT INTO users (email, password_hash, role, github_token, two_factor_secret) VALUES (?, ?, ?, ?, ?)'
       );
-      const info = stmt.run(email, '', 'user', access_token);
+      const info = stmt.run(email, '', 'user', access_token, secret.base32);
       user = db.prepare('SELECT * FROM users WHERE id = ?').get(info.lastInsertRowid);
     } else {
       // Update existing user's GitHub token
