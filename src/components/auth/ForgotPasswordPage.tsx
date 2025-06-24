@@ -12,7 +12,7 @@ const ForgotPasswordPage: React.FC = () => {
   // Helper function to get API base URL
   const getApiBaseUrl = () => {
     return process.env.NODE_ENV === 'production' 
-      ? (process.env.VITE_API_URL || 'https://your-backend-url.onrender.com')
+      ? (process.env.VITE_API_URL || 'https://devops-ai-platform.onrender.com')
       : '';
   };
 
