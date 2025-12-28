@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" fill="none">
+  <defs>
+    <linearGradient id="aikyaGradient" x1="12" y1="12" x2="52" y2="52">
+      <stop offset="0%" stop-color="#f59e0b"/>
+      <stop offset="55%" stop-color="#f97316"/>
+      <stop offset="100%" stop-color="#14b8a6"/>
+    </linearGradient>
+  </defs>
+  <circle cx="32" cy="32" r="22" stroke="url(#aikyaGradient)" stroke-width="3.5" opacity="0.9"/>
+  <path d="M18 27c5-7 13-11 14-11s9 4 14 11" stroke="url(#aikyaGradient)" stroke-width="3.5" stroke-linecap="round"/>
+  <path d="M18 37c5 7 13 11 14 11s9-4 14-11" stroke="url(#aikyaGradient)" stroke-width="3.5" stroke-linecap="round"/>
+  <circle cx="32" cy="32" r="4" fill="url(#aikyaGradient)"/>
+</svg>

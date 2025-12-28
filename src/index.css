@@ -1,0 +1,149 @@
+@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600;700&family=Manrope:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 222 35% 6%;
+    --foreground: 210 40% 98%;
+    --card: 222 35% 8%;
+    --card-foreground: 210 40% 98%;
+    --popover: 222 35% 8%;
+    --popover-foreground: 210 40% 98%;
+    --primary: 42 96% 58%;
+    --primary-foreground: 222 47% 11%;
+    --secondary: 173 80% 40%;
+    --secondary-foreground: 210 40% 98%;
+    --muted: 220 20% 14%;
+    --muted-foreground: 215 16% 65%;
+    --accent: 28 90% 54%;
+    --accent-foreground: 210 40% 98%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 215 25% 18%;
+    --input: 215 25% 18%;
+    --ring: 42 96% 58%;
+    --radius: 0.5rem;
+  }
+
+  * {
+    @apply border-slate-800;
+  }
+  
+  html {
+    @apply bg-slate-950;
+  }
+  
+  body {
+    font-family: 'Manrope', 'Noto Sans', sans-serif;
+    @apply min-h-screen text-white;
+    background-color: #0b0f14;
+    background-image:
+      radial-gradient(900px circle at 12% 12%, rgba(245, 158, 11, 0.18), transparent 55%),
+      radial-gradient(900px circle at 88% 18%, rgba(20, 184, 166, 0.16), transparent 50%),
+      radial-gradient(700px circle at 50% 85%, rgba(249, 115, 22, 0.12), transparent 60%),
+      linear-gradient(160deg, #0b0f14 0%, #0f172a 45%, #111827 100%);
+  }
+
+  /* Prevent white flash on page load */
+  #root {
+    @apply min-h-screen;
+    background-color: #0b0f14;
+    background-image:
+      radial-gradient(900px circle at 12% 12%, rgba(245, 158, 11, 0.18), transparent 55%),
+      radial-gradient(900px circle at 88% 18%, rgba(20, 184, 166, 0.16), transparent 50%),
+      radial-gradient(700px circle at 50% 85%, rgba(249, 115, 22, 0.12), transparent 60%),
+      linear-gradient(160deg, #0b0f14 0%, #0f172a 45%, #111827 100%);
+  }
+
+  select,
+  option {
+    background-color: #0f172a;
+    color: #e2e8f0;
+  }
+}
+
+@layer components {
+  .font-display {
+    font-family: 'Cinzel', 'Manrope', serif;
+    letter-spacing: 0.02em;
+  }
+
+  .bg-aikya {
+    background-color: #0b0f14;
+    background-image:
+      radial-gradient(900px circle at 12% 12%, rgba(245, 158, 11, 0.18), transparent 55%),
+      radial-gradient(900px circle at 88% 18%, rgba(20, 184, 166, 0.16), transparent 50%),
+      radial-gradient(700px circle at 50% 85%, rgba(249, 115, 22, 0.12), transparent 60%),
+      linear-gradient(160deg, #0b0f14 0%, #0f172a 45%, #111827 100%);
+  }
+
+  .glass {
+    @apply bg-slate-900/60 backdrop-blur-sm border border-white/10;
+  }
+
+  .gradient-text {
+    @apply bg-gradient-to-r from-amber-300 via-orange-300 to-teal-300 bg-clip-text text-transparent;
+  }
+}
+
+@layer utilities {
+  .fade-in {
+    animation: fadeIn 0.3s ease-in-out;
+  }
+
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  .aikya-rise {
+    animation: aikyaRise 0.7s ease-out both;
+  }
+
+  .aikya-float {
+    animation: aikyaFloat 8s ease-in-out infinite;
+  }
+
+  @keyframes aikyaRise {
+    from {
+      opacity: 0;
+      transform: translateY(24px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes aikyaFloat {
+    0%,
+    100% {
+      transform: translateY(0);
+    }
+    50% {
+      transform: translateY(-8px);
+    }
+  }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  @apply w-1.5 h-1.5;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-slate-800/50 rounded;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-amber-500/50 rounded hover:bg-amber-500/70;
+}
