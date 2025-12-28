@@ -6,7 +6,7 @@ import { db } from '../database/init.js';
 import axios from 'axios';
 import { authenticateToken } from '../middleware/auth.js';
 import { logAuditAction } from '../utils/audit.js';
-import nodemailer from 'nodemailer';
+import { createEmailTransport } from '../utils/email.js';
 import crypto from 'crypto';
 import speakeasy from 'speakeasy';
 import qrcode from 'qrcode';
@@ -27,27 +27,13 @@ const getJwtSecret = () => {
 const ALLOWED_ROLES = ['developer', 'manager', 'user'];
 
 // Email transporter setup (use environment variables in production)
-let transporter = null;
-
-// Check if email credentials are available
-const emailUser = process.env.EMAIL_USER;
 const emailFrom = process.env.EMAIL_FROM || process.env.EMAIL_USER;
-const emailPass = process.env.EMAIL_PASS ? process.env.EMAIL_PASS.replace(/\s+/g, '') : '';
+let transporter = createEmailTransport();
 
-if (emailUser && emailPass) {
-  transporter = nodemailer.createTransport({
-    service: 'gmail',
-    auth: {
-      user: emailUser,
-      pass: emailPass
-    }
-  });
-  
-  // Verify transporter configuration
-  transporter.verify(function(error, success) {
+if (transporter) {
+  transporter.verify(function(error) {
     if (error) {
       console.error('Email transporter verification failed:', error);
-      transporter = null;
     } else {
       console.log('Email transporter is ready to send messages');
     }

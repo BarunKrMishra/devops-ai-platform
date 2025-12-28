@@ -2,7 +2,7 @@ import express from 'express';
 import { db } from '../database/init.js';
 import { requireRole } from '../middleware/auth.js';
 import { logAuditAction } from '../utils/audit.js';
-import nodemailer from 'nodemailer';
+import { createEmailTransport } from '../utils/email.js';
 import crypto from 'crypto';
 
 const router = express.Router();
@@ -11,23 +11,12 @@ const INVITE_EXPIRES_DAYS = 7;
 const ALLOWED_INVITE_ROLES = ['developer', 'manager', 'viewer'];
 const emailFrom = process.env.EMAIL_FROM || process.env.EMAIL_USER;
 
-let transporter = null;
-const emailUser = process.env.EMAIL_USER;
-const emailPass = process.env.EMAIL_PASS ? process.env.EMAIL_PASS.replace(/\s+/g, '') : '';
+let transporter = createEmailTransport();
 
-if (emailUser && emailPass) {
-  transporter = nodemailer.createTransport({
-    service: 'gmail',
-    auth: {
-      user: emailUser,
-      pass: emailPass
-    }
-  });
-
+if (transporter) {
   transporter.verify((error) => {
     if (error) {
       console.error('Team invite email transporter verification failed:', error);
-      transporter = null;
     }
   });
 } else {

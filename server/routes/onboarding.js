@@ -1,6 +1,6 @@
 import express from 'express';
-import nodemailer from 'nodemailer';
 import { db } from '../database/init.js';
+import { createEmailTransport } from '../utils/email.js';
 
 const router = express.Router();
 
@@ -75,24 +75,13 @@ const getOrgSettings = (orgId) => {
   return { demo_mode: true };
 };
 
-let transporter = null;
-const emailUser = process.env.EMAIL_USER;
-const emailPass = process.env.EMAIL_PASS ? process.env.EMAIL_PASS.replace(/\s+/g, '') : '';
 const emailFrom = process.env.EMAIL_FROM || process.env.EMAIL_USER;
+let transporter = createEmailTransport();
 
-if (emailUser && emailPass) {
-  transporter = nodemailer.createTransport({
-    service: 'gmail',
-    auth: {
-      user: emailUser,
-      pass: emailPass
-    }
-  });
-
+if (transporter) {
   transporter.verify((error) => {
     if (error) {
       console.error('Onboarding email transporter verification failed:', error);
-      transporter = null;
     } else {
       console.log('Onboarding email transporter is ready to send messages');
     }
