@@ -30,10 +30,10 @@ services:
       context: .
       dockerfile: Dockerfile.web
       args:
-        VITE_API_URL: /api
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:2025}
         VITE_GITHUB_CLIENT_ID: ${VITE_GITHUB_CLIENT_ID}
     ports:
-      - "80:80"
+      - "2025:80"
     restart: unless-stopped
     depends_on:
       - api

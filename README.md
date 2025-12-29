@@ -92,12 +92,12 @@ A modern DevOps platform with AI-powered automation, CI/CD pipelines, infrastruc
    docker-compose up -d --build
    ```
 
-4. Open the app at [http://your-server-ip](http://your-server-ip).
+4. Open the app at [http://your-server-ip:2025](http://your-server-ip:2025).
 
 Notes:
 - The API runs on port 3001 inside the Docker network.
 - SQLite data is stored in a Docker volume named `aikya_data`.
-- Set `APP_BASE_URL` and `CORS_ORIGIN` to your server IP or domain.
+- Set `APP_BASE_URL`, `CORS_ORIGIN`, and `VITE_API_URL` to include port 2025.
 
 ## Development
 
