@@ -111,7 +111,9 @@ const LoginPage: React.FC = () => {
     }
 
     const redirectUri = `${window.location.origin}/auth/github/callback`;
-    const state = crypto.randomUUID();
+    const state = window.crypto?.randomUUID
+      ? window.crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
     sessionStorage.setItem('github_oauth_state', state);
 
     const params = new URLSearchParams({
