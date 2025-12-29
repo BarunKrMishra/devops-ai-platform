@@ -394,6 +394,7 @@ const TeamCollaborationPage: React.FC = () => {
                   className="w-full p-3 rounded-lg bg-white/10 border border-white/20 text-white focus:border-amber-400 focus:outline-none"
                 >
                   <option value="developer" className="bg-slate-900 text-slate-100">Developer</option>
+                  <option value="admin" className="bg-slate-900 text-slate-100">Admin</option>
                   <option value="manager" className="bg-slate-900 text-slate-100">Manager</option>
                   <option value="viewer" className="bg-slate-900 text-slate-100">Viewer</option>
                 </select>

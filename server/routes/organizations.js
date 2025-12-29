@@ -8,7 +8,7 @@ import crypto from 'crypto';
 const router = express.Router();
 const APP_BASE_URL = process.env.APP_BASE_URL || 'http://localhost:5173';
 const INVITE_EXPIRES_DAYS = 7;
-const ALLOWED_INVITE_ROLES = ['developer', 'manager', 'viewer'];
+const ALLOWED_INVITE_ROLES = ['developer', 'manager', 'admin', 'viewer'];
 const emailFrom = process.env.EMAIL_FROM || process.env.EMAIL_USER;
 
 let transporter = createEmailTransport();

@@ -41,7 +41,7 @@ router.get('/repositories', async (req, res) => {
     }
 
     if (provider === 'github' && !githubToken) {
-      return res.status(401).json({
+      return res.status(400).json({
         error: 'GitHub integration not configured. Connect GitHub in Integrations first.'
       });
     }
@@ -89,7 +89,7 @@ router.get('/repositories', async (req, res) => {
     }
 
     if (!gitlabToken) {
-      return res.status(401).json({
+      return res.status(400).json({
         error: 'GitLab integration not configured. Connect GitLab in Integrations first.'
       });
     }
@@ -123,8 +123,8 @@ router.get('/repositories', async (req, res) => {
     console.error('Repository fetch error:', error);
     
     if (error.status === 401) {
-      return res.status(401).json({ 
-        error: 'Repository token expired or invalid. Please reconnect your provider.' 
+      return res.status(400).json({
+        error: 'Repository token expired or invalid. Please reconnect your provider.'
       });
     }
     

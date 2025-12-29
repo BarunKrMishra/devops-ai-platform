@@ -8,6 +8,7 @@ const LoginPage: React.FC = () => {
   const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -51,12 +52,17 @@ const LoginPage: React.FC = () => {
       if (isLogin) {
         await login(email, password, twoFactorToken);
       } else {
+        if (registrationStep === 'form' && confirmPassword !== password) {
+          setError('Passwords do not match');
+          setLoading(false);
+          return;
+        }
         if (registrationStep === 'form') {
           // First step: create pending user, send OTP
-          await register(email, password, 'developer');
+          await register(email, password, 'manager');
         } else {
           // Second step: verify OTP and activate user
-          await register(email, password, 'developer', twoFactorToken);
+          await register(email, password, 'manager', twoFactorToken);
         }
       }
     } catch (err: any) {
@@ -67,8 +73,9 @@ const LoginPage: React.FC = () => {
           err.message.includes('OTP sent to email') ||
           err.message.includes('OTP sent to email to complete registration'))
       ) {
-        setShow2FA(true);
-        setRegistrationStep('otp');
+          setShow2FA(true);
+          setRegistrationStep('otp');
+          setConfirmPassword('');
         // Try to detect method from error message or backend response
         if (err.message.includes('email')) {
           setTwoFAMethod('email');
@@ -187,6 +194,25 @@ const LoginPage: React.FC = () => {
               )}
             </div>
 
+            {!isLogin && !show2FA && (
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-2">
+                  Confirm Password
+                </label>
+                <div className="relative">
+                  <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-slate-400" />
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    className="w-full pl-10 pr-12 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-slate-400 focus:border-amber-300 focus:outline-none"
+                    placeholder="Re-enter your password"
+                    required
+                    minLength={8}
+                  />
+                </div>
+              </div>
+            )}
             {show2FA && (
               <div>
                 <label className="block text-sm font-medium text-slate-300 mb-2">
@@ -251,7 +277,15 @@ const LoginPage: React.FC = () => {
 
           <div className="mt-8 text-center">
             <button
-              onClick={() => setIsLogin(!isLogin)}
+              onClick={() => {
+                setIsLogin(!isLogin);
+                setShow2FA(false);
+                setRegistrationStep('form');
+                setConfirmPassword('');
+                setTwoFactorToken('');
+                setError('');
+                setInfo('');
+              }}
               className="text-slate-400 hover:text-white transition-colors"
             >
               {isLogin ? "Don't have an account? Sign up" : "Already have an account? Sign in"}
@@ -264,4 +298,3 @@ const LoginPage: React.FC = () => {
 };
 
 export default LoginPage;
-
