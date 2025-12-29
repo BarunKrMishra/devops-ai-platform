@@ -1,13 +1,18 @@
 import Database from 'better-sqlite3';
 import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
+import { dirname, join, resolve } from 'path';
 import bcrypt from 'bcrypt';
 import speakeasy from 'speakeasy';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-const db = new Database(join(__dirname, '../../devops_ai.db'));
+const defaultDbPath = join(__dirname, '../../devops_ai.db');
+const dbPath = process.env.DATABASE_PATH
+  ? resolve(process.env.DATABASE_PATH)
+  : defaultDbPath;
+
+const db = new Database(dbPath);
 
 export const initDatabase = async () => {
   try {

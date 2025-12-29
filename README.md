@@ -74,6 +74,31 @@ A modern DevOps platform with AI-powered automation, CI/CD pipelines, infrastruc
 
 6. Open [http://localhost:5173](http://localhost:5173) in your browser
 
+## Docker Deployment
+
+1. Copy the example env file:
+   ```bash
+   cp .env.example .env
+   ```
+
+2. Fill in the required variables in `.env`:
+   - `JWT_SECRET`
+   - `INTEGRATION_MASTER_KEY`
+   - `VITE_GITHUB_CLIENT_ID`
+   - `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET`
+
+3. Build and run:
+   ```bash
+   docker compose up --build
+   ```
+
+4. Open the app at [http://localhost:8080](http://localhost:8080).
+
+Notes:
+- The API runs on port 3001 inside the Docker network.
+- SQLite data is stored in a Docker volume named `aikya_data`.
+- For production, set `APP_BASE_URL` and `CORS_ORIGIN` to your domain and change the port mapping to `80:80`.
+
 ## Development
 
 - Frontend runs on port 5173

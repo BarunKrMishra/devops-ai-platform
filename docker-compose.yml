@@ -1,0 +1,40 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+      DATABASE_PATH: /data/devops_ai.db
+      JWT_SECRET: ${JWT_SECRET}
+      INTEGRATION_MASTER_KEY: ${INTEGRATION_MASTER_KEY}
+      APP_BASE_URL: ${APP_BASE_URL:-http://localhost:8080}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:8080}
+      EMAIL_USER: ${EMAIL_USER}
+      EMAIL_PASS: ${EMAIL_PASS}
+      EMAIL_FROM: ${EMAIL_FROM}
+      BUSINESS_INBOX: ${BUSINESS_INBOX}
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET}
+      INTEGRATION_GITHUB_CLIENT_ID: ${INTEGRATION_GITHUB_CLIENT_ID}
+      INTEGRATION_GITHUB_CLIENT_SECRET: ${INTEGRATION_GITHUB_CLIENT_SECRET}
+    volumes:
+      - aikya_data:/data
+    expose:
+      - "3001"
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+      args:
+        VITE_API_URL: /api
+        VITE_GITHUB_CLIENT_ID: ${VITE_GITHUB_CLIENT_ID}
+    ports:
+      - "8080:80"
+    depends_on:
+      - api
+
+volumes:
+  aikya_data:
