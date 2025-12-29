@@ -49,6 +49,8 @@ const TeamCollaborationPage: React.FC = () => {
     role: 'developer',
     teamIds: [] as number[]
   });
+  const [memberRoleDrafts, setMemberRoleDrafts] = useState<Record<number, string>>({});
+  const [teamMemberSelection, setTeamMemberSelection] = useState<Record<number, string>>({});
 
   const isManager = user?.role === 'admin' || user?.role === 'manager';
 
@@ -75,6 +77,12 @@ const TeamCollaborationPage: React.FC = () => {
       setOrganization(orgRes.data);
       setSeatLimit(orgRes.data.seat_limit ? String(orgRes.data.seat_limit) : '');
       setMembers(membersRes.data);
+      setMemberRoleDrafts(
+        membersRes.data.reduce((acc: Record<number, string>, member: Member) => {
+          acc[member.id] = member.role;
+          return acc;
+        }, {})
+      );
       setTeams(teamsRes.data);
     } catch (err) {
       console.error('Failed to load team data:', err);
@@ -190,6 +198,86 @@ const TeamCollaborationPage: React.FC = () => {
         teamIds: exists ? prev.teamIds.filter((id) => id !== teamId) : [...prev.teamIds, teamId]
       };
     });
+  };
+
+  const handleRoleSave = async (memberId: number) => {
+    setError('');
+    setStatus('');
+    if (!isManager) {
+      setError('You do not have permission to update roles.');
+      return;
+    }
+    if (memberId === user?.id) {
+      setError('You cannot change your own role.');
+      return;
+    }
+
+    const role = memberRoleDrafts[memberId];
+    try {
+      await axios.put(`${API_URL}/api/organizations/members/${memberId}/role`, { role });
+      setStatus('Role updated.');
+      await loadData();
+    } catch (err: any) {
+      setError(err.response?.data?.error || 'Failed to update role.');
+    }
+  };
+
+  const handleRemoveMember = async (memberId: number) => {
+    setError('');
+    setStatus('');
+    if (!isManager) {
+      setError('You do not have permission to remove members.');
+      return;
+    }
+    if (memberId === user?.id) {
+      setError('You cannot remove yourself.');
+      return;
+    }
+    try {
+      await axios.delete(`${API_URL}/api/organizations/members/${memberId}`);
+      setStatus('Member removed.');
+      await loadData();
+    } catch (err: any) {
+      setError(err.response?.data?.error || 'Failed to remove member.');
+    }
+  };
+
+  const handleAddTeamMember = async (teamId: number) => {
+    setError('');
+    setStatus('');
+    if (!isManager) {
+      setError('You do not have permission to manage team members.');
+      return;
+    }
+    const memberId = Number(teamMemberSelection[teamId]);
+    if (!memberId) {
+      setError('Select a member to add.');
+      return;
+    }
+    try {
+      await axios.post(`${API_URL}/api/teams/${teamId}/members`, { userId: memberId });
+      setTeamMemberSelection((prev) => ({ ...prev, [teamId]: '' }));
+      setStatus('Member added to team.');
+      await loadData();
+    } catch (err: any) {
+      setError(err.response?.data?.error || 'Failed to add member.');
+    }
+  };
+
+  const handleRemoveTeamMember = async (teamId: number, memberId: number) => {
+    setError('');
+    setStatus('');
+    if (!isManager) {
+      setError('You do not have permission to manage team members.');
+      return;
+    }
+    try {
+      await axios.delete(`${API_URL}/api/teams/${teamId}/members/${memberId}`);
+      setStatus('Member removed from team.');
+      await loadData();
+    } catch (err: any) {
+      setError(err.response?.data?.error || 'Failed to remove member from team.');
+    }
   };
 
   if (loading) {
@@ -344,16 +432,56 @@ const TeamCollaborationPage: React.FC = () => {
                       {team.members.length === 0 && (
                         <p className="text-xs text-slate-500">No members assigned yet.</p>
                       )}
-                      {team.members.slice(0, 4).map((member) => (
-                        <div key={member.id} className="text-xs text-slate-300 flex items-center gap-2">
-                          <Users className="h-3 w-3 text-slate-500" />
-                          <span>{member.name || member.email}</span>
+                      {team.members.map((member) => (
+                        <div key={member.id} className="text-xs text-slate-300 flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2">
+                            <Users className="h-3 w-3 text-slate-500" />
+                            <span>{member.name || member.email}</span>
+                          </div>
+                          {isManager && (
+                            <button
+                              onClick={() => handleRemoveTeamMember(team.id, member.id)}
+                              className="text-[11px] text-rose-300 hover:text-rose-200"
+                            >
+                              Remove
+                            </button>
+                          )}
                         </div>
                       ))}
-                      {team.members.length > 4 && (
-                        <p className="text-xs text-slate-500">+{team.members.length - 4} more</p>
-                      )}
                     </div>
+
+                    {isManager && (
+                      <div className="mt-4">
+                        <p className="text-xs text-slate-400 mb-2">Add member</p>
+                        <div className="flex items-center gap-2">
+                          <select
+                            value={teamMemberSelection[team.id] || ''}
+                            onChange={(event) =>
+                              setTeamMemberSelection((prev) => ({ ...prev, [team.id]: event.target.value }))
+                            }
+                            className="flex-1 p-2 rounded-lg bg-white/10 border border-white/20 text-white focus:border-amber-400 focus:outline-none"
+                          >
+                            <option value="" className="bg-slate-900 text-slate-100">Select member</option>
+                            {members
+                              .filter((member) => !team.members.some((assigned) => assigned.id === member.id))
+                              .map((member) => (
+                                <option key={member.id} value={member.id} className="bg-slate-900 text-slate-100">
+                                  {member.name || member.email}
+                                </option>
+                              ))}
+                          </select>
+                          <button
+                            onClick={() => handleAddTeamMember(team.id)}
+                            className="px-3 py-2 rounded-lg bg-amber-500 text-white hover:bg-amber-600 transition-colors"
+                          >
+                            Add
+                          </button>
+                        </div>
+                        {members.filter((member) => !team.members.some((assigned) => assigned.id === member.id)).length === 0 && (
+                          <p className="text-xs text-slate-500 mt-2">All members are already in this team.</p>
+                        )}
+                      </div>
+                    )}
                   </div>
                 ))}
 
@@ -458,9 +586,43 @@ const TeamCollaborationPage: React.FC = () => {
                       <p className="text-sm text-white">{member.name || member.email}</p>
                       <p className="text-xs text-slate-400">{member.email}</p>
                     </div>
-                    <span className="text-xs text-slate-300 bg-white/10 px-2 py-1 rounded-full capitalize">
-                      {member.role}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      {isManager ? (
+                        <>
+                          <select
+                            value={memberRoleDrafts[member.id] || member.role}
+                            onChange={(event) =>
+                              setMemberRoleDrafts((prev) => ({ ...prev, [member.id]: event.target.value }))
+                            }
+                            className="text-xs bg-white/10 border border-white/20 text-white rounded-md px-2 py-1 focus:border-amber-400 focus:outline-none"
+                          >
+                            <option value="developer" className="bg-slate-900 text-slate-100">Developer</option>
+                            <option value="admin" className="bg-slate-900 text-slate-100">Admin</option>
+                            <option value="manager" className="bg-slate-900 text-slate-100">Manager</option>
+                            <option value="viewer" className="bg-slate-900 text-slate-100">Viewer</option>
+                            <option value="user" className="bg-slate-900 text-slate-100">User</option>
+                          </select>
+                          <button
+                            onClick={() => handleRoleSave(member.id)}
+                            disabled={memberRoleDrafts[member.id] === member.role || member.id === user?.id}
+                            className="text-xs text-amber-300 hover:text-amber-200 disabled:opacity-40"
+                          >
+                            Save
+                          </button>
+                          <button
+                            onClick={() => handleRemoveMember(member.id)}
+                            disabled={member.id === user?.id}
+                            className="text-xs text-rose-300 hover:text-rose-200 disabled:opacity-40"
+                          >
+                            Remove
+                          </button>
+                        </>
+                      ) : (
+                        <span className="text-xs text-slate-300 bg-white/10 px-2 py-1 rounded-full capitalize">
+                          {member.role}
+                        </span>
+                      )}
+                    </div>
                   </div>
                 ))}
                 {members.length === 0 && (

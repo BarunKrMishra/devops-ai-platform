@@ -256,13 +256,19 @@ router.post('/invites', requireRole(['admin', 'manager']), async (req, res) => {
   }
 });
 
+const ALLOWED_MEMBER_ROLES = ['developer', 'manager', 'admin', 'viewer', 'user'];
+
 // Update member role
-router.put('/members/:memberId/role', requireRole(['admin']), async (req, res) => {
+router.put('/members/:memberId/role', requireRole(['admin', 'manager']), async (req, res) => {
   try {
     const { memberId } = req.params;
     const { role } = req.body;
     const organizationId = req.user.organization_id;
     const userId = req.user.id;
+
+    if (!ALLOWED_MEMBER_ROLES.includes(role)) {
+      return res.status(400).json({ error: 'Invalid role' });
+    }
 
     // Verify member belongs to organization
     const member = db.prepare(`
@@ -272,6 +278,10 @@ router.put('/members/:memberId/role', requireRole(['admin']), async (req, res) =
 
     if (!member) {
       return res.status(404).json({ error: 'Member not found' });
+    }
+
+    if (Number(memberId) === Number(userId)) {
+      return res.status(400).json({ error: 'You cannot change your own role.' });
     }
 
     db.prepare('UPDATE users SET role = ? WHERE id = ?').run(role, memberId);
@@ -289,7 +299,7 @@ router.put('/members/:memberId/role', requireRole(['admin']), async (req, res) =
 });
 
 // Remove member from organization
-router.delete('/members/:memberId', requireRole(['admin']), async (req, res) => {
+router.delete('/members/:memberId', requireRole(['admin', 'manager']), async (req, res) => {
   try {
     const { memberId } = req.params;
     const organizationId = req.user.organization_id;
@@ -303,6 +313,10 @@ router.delete('/members/:memberId', requireRole(['admin']), async (req, res) => 
 
     if (!member) {
       return res.status(404).json({ error: 'Member not found' });
+    }
+
+    if (Number(memberId) === Number(userId)) {
+      return res.status(400).json({ error: 'You cannot remove yourself.' });
     }
 
     // Deactivate user instead of deleting

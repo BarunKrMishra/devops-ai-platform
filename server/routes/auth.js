@@ -26,6 +26,31 @@ const getJwtSecret = () => {
 // Allowed roles for registration
 const ALLOWED_ROLES = ['developer', 'manager', 'user'];
 
+const normalizeSlug = (value) => {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+};
+
+const createOrganizationForEmail = (email) => {
+  const domain = email.split('@')[1] || '';
+  const base = normalizeSlug(domain || email.split('@')[0] || 'workspace');
+  let slug = base || 'workspace';
+
+  const existing = db.prepare('SELECT id FROM organizations WHERE slug = ?').get(slug);
+  if (existing) {
+    slug = `${slug}-${crypto.randomBytes(3).toString('hex')}`;
+  }
+
+  const name = domain ? `${domain} workspace` : 'Aikya workspace';
+  const result = db.prepare(
+    'INSERT INTO organizations (name, slug, plan) VALUES (?, ?, ?)'
+  ).run(name, slug, 'free');
+
+  return result.lastInsertRowid;
+};
+
 // Email transporter setup (use environment variables in production)
 const emailFrom = process.env.EMAIL_FROM || process.env.EMAIL_USER;
 let transporter = createEmailTransport();
@@ -99,6 +124,33 @@ function logUserContact(email, action) {
   });
 }
 
+function acceptPendingInvite(invite, userId) {
+  if (!invite) {
+    return;
+  }
+  try {
+    const teamIds = JSON.parse(invite.team_ids || '[]');
+    if (Array.isArray(teamIds) && teamIds.length > 0) {
+      const teams = db.prepare(`
+        SELECT id FROM teams WHERE organization_id = ? AND id IN (${teamIds.map(() => '?').join(',')})
+      `).all(invite.organization_id, ...teamIds);
+      teams.forEach((team) => {
+        db.prepare(`
+          INSERT OR IGNORE INTO team_members (team_id, user_id, role)
+          VALUES (?, ?, 'member')
+        `).run(team.id, userId);
+      });
+    }
+    db.prepare(`
+      UPDATE organization_invites
+      SET status = 'accepted', accepted_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `).run(invite.id);
+  } catch (inviteError) {
+    console.error('Invite acceptance failed:', inviteError);
+  }
+}
+
 // Register
 router.post('/register', async (req, res) => {
   try {
@@ -129,17 +181,24 @@ router.post('/register', async (req, res) => {
       return res.status(400).json({ error: 'Invalid role' });
     }
 
-    const pendingInvite = db.prepare(`
-      SELECT * FROM organization_invites
-      WHERE email = ? AND status = 'pending' AND (expires_at IS NULL OR datetime(expires_at) > datetime('now'))
-    `).get(email);
-    const resolvedOrganizationId = pendingInvite ? pendingInvite.organization_id : 1;
-    const resolvedRole = pendingInvite ? pendingInvite.role : role;
-
     // Check if user exists
     const existingUser = db.prepare('SELECT * FROM users WHERE email = ? AND is_active = 1').get(email);
     if (existingUser) {
       return res.status(400).json({ error: 'User already exists' });
+    }
+
+    const pendingInvite = db.prepare(`
+      SELECT * FROM organization_invites
+      WHERE email = ? AND status = 'pending' AND (expires_at IS NULL OR datetime(expires_at) > datetime('now'))
+    `).get(email);
+
+    let resolvedOrganizationId = pendingInvite ? pendingInvite.organization_id : null;
+    let resolvedRole = pendingInvite ? pendingInvite.role : 'manager';
+    let createdOrganizationId = null;
+
+    if (!pendingInvite && !twoFactorToken) {
+      createdOrganizationId = createOrganizationForEmail(email);
+      resolvedOrganizationId = createdOrganizationId;
     }
 
     // Hash password
@@ -184,6 +243,9 @@ router.post('/register', async (req, res) => {
         console.error('Email sending error:', e);
         // Clean up temporary user if email fails
         db.prepare('DELETE FROM users WHERE id = ?').run(tempUserId);
+        if (createdOrganizationId) {
+          db.prepare('DELETE FROM organizations WHERE id = ?').run(createdOrganizationId);
+        }
         
         if (e.message === 'Email service not configured') {
           return res.status(500).json({ 
@@ -262,29 +324,7 @@ router.post('/register', async (req, res) => {
     // 2FA verified - activate the user and complete registration
     db.prepare('UPDATE users SET is_active = 1, reset_otp = NULL, otp_expiry = NULL, last_login = CURRENT_TIMESTAMP WHERE id = ?').run(tempUser.id);
 
-    if (pendingInvite) {
-      try {
-        const teamIds = JSON.parse(pendingInvite.team_ids || '[]');
-        if (Array.isArray(teamIds) && teamIds.length > 0) {
-          const teams = db.prepare(`
-            SELECT id FROM teams WHERE organization_id = ? AND id IN (${teamIds.map(() => '?').join(',')})
-          `).all(pendingInvite.organization_id, ...teamIds);
-          teams.forEach((team) => {
-            db.prepare(`
-              INSERT OR IGNORE INTO team_members (team_id, user_id, role)
-              VALUES (?, ?, 'member')
-            `).run(team.id, tempUser.id);
-          });
-        }
-        db.prepare(`
-          UPDATE organization_invites
-          SET status = 'accepted', accepted_at = CURRENT_TIMESTAMP
-          WHERE id = ?
-        `).run(pendingInvite.id);
-      } catch (inviteError) {
-        console.error('Invite acceptance during registration failed:', inviteError);
-      }
-    }
+    acceptPendingInvite(pendingInvite, tempUser.id);
 
     // Log user contact for sales
     logUserContact(email, 'register');
@@ -520,10 +560,20 @@ router.post('/github', async (req, res) => {
           .run(githubId, access_token, existingByEmail.id);
         user = db.prepare('SELECT * FROM users WHERE id = ?').get(existingByEmail.id);
       } else {
+        const pendingInvite = db.prepare(`
+          SELECT * FROM organization_invites
+          WHERE email = ? AND status = 'pending' AND (expires_at IS NULL OR datetime(expires_at) > datetime('now'))
+        `).get(email);
+        const resolvedRole = pendingInvite ? pendingInvite.role : 'manager';
+        const resolvedOrganizationId = pendingInvite
+          ? pendingInvite.organization_id
+          : createOrganizationForEmail(email);
+
         const result = db.prepare(
           'INSERT INTO users (email, github_id, role, organization_id, is_active, two_factor_secret, github_token, name) VALUES (?, ?, ?, ?, 1, ?, ?, ?)'
-        ).run(email, githubId, 'developer', 1, secret.base32, access_token, name);
+        ).run(email, githubId, resolvedRole, resolvedOrganizationId, secret.base32, access_token, name);
         user = db.prepare('SELECT * FROM users WHERE id = ?').get(result.lastInsertRowid);
+        acceptPendingInvite(pendingInvite, user.id);
       }
     } else {
       db.prepare('UPDATE users SET github_token = ? WHERE id = ?').run(access_token, user.id);
@@ -619,10 +669,20 @@ router.get('/github/callback', async (req, res) => {
           .run(githubId, access_token, existingByEmail.id);
         user = db.prepare('SELECT * FROM users WHERE id = ?').get(existingByEmail.id);
       } else {
+        const pendingInvite = db.prepare(`
+          SELECT * FROM organization_invites
+          WHERE email = ? AND status = 'pending' AND (expires_at IS NULL OR datetime(expires_at) > datetime('now'))
+        `).get(email);
+        const resolvedRole = pendingInvite ? pendingInvite.role : 'manager';
+        const resolvedOrganizationId = pendingInvite
+          ? pendingInvite.organization_id
+          : createOrganizationForEmail(email);
+
         const result = db.prepare(
           'INSERT INTO users (email, github_id, role, organization_id, is_active, two_factor_secret, github_token, name) VALUES (?, ?, ?, ?, 1, ?, ?, ?)'
-        ).run(email, githubId, 'developer', 1, secret.base32, access_token, name);
+        ).run(email, githubId, resolvedRole, resolvedOrganizationId, secret.base32, access_token, name);
         user = db.prepare('SELECT * FROM users WHERE id = ?').get(result.lastInsertRowid);
+        acceptPendingInvite(pendingInvite, user.id);
       }
     } else {
       db.prepare('UPDATE users SET github_token = ? WHERE id = ?').run(access_token, user.id);
