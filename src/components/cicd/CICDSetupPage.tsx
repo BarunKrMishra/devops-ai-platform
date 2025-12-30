@@ -22,6 +22,7 @@ interface Pipeline {
   status: 'success' | 'failed' | 'pending';
   framework: string;
   cloud_provider: string;
+  source?: string;
 }
 
 const CICDSetupPage: React.FC = () => {
@@ -442,15 +443,24 @@ const CICDSetupPage: React.FC = () => {
                         <span className="px-2 py-1 bg-slate-700 rounded text-sm text-slate-300">
                           {pipeline.cloud_provider}
                         </span>
+                        {pipeline.source && pipeline.source !== 'project' && (
+                          <span className="px-2 py-1 bg-white/10 rounded text-sm text-slate-300 capitalize">
+                            {pipeline.source}
+                          </span>
+                        )}
                       </div>
-                      <button
-                        onClick={() => handleDeploy(pipeline.id)}
-                        className="flex items-center space-x-2 px-3 py-1 bg-amber-600 text-white rounded hover:bg-amber-700 transition-colors"
-                      >
-                    <Play className="h-4 w-4" />
-                        <span>Deploy</span>
-                  </button>
-                </div>
+                      {pipeline.source !== 'project' ? (
+                        <span className="text-xs text-slate-400">Managed by provider</span>
+                      ) : (
+                        <button
+                          onClick={() => handleDeploy(pipeline.id)}
+                          className="flex items-center space-x-2 px-3 py-1 bg-amber-600 text-white rounded hover:bg-amber-700 transition-colors"
+                        >
+                          <Play className="h-4 w-4" />
+                          <span>Deploy</span>
+                        </button>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>
@@ -468,4 +478,3 @@ const CICDSetupPage: React.FC = () => {
 };
 
 export default CICDSetupPage;
-

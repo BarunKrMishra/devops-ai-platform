@@ -3,9 +3,20 @@ import { Octokit } from '@octokit/rest';
 import axios from 'axios';
 import { db } from '../database/init.js';
 import { logAuditAction } from '../utils/audit.js';
-import { decryptPayload } from '../utils/encryption.js';
+import { getIntegrationRecord } from '../utils/integrations.js';
 
 const router = express.Router();
+
+const extractToken = (credentials) =>
+  credentials?.access_token || credentials?.token || credentials?.api_token || credentials?.pat || null;
+
+const mapPipelineStatus = (status) => {
+  if (!status) return 'pending';
+  const normalized = String(status).toLowerCase();
+  if (['success', 'passed', 'succeeded'].includes(normalized)) return 'success';
+  if (['failed', 'failure', 'error', 'canceled', 'cancelled'].includes(normalized)) return 'failed';
+  return 'pending';
+};
 
 // Get user's repositories (GitHub)
 router.get('/repositories', async (req, res) => {
@@ -23,21 +34,8 @@ router.get('/repositories', async (req, res) => {
     let githubToken = user?.github_token;
 
     if (!githubToken) {
-      const integration = db.prepare(
-        `SELECT s.encrypted_payload
-         FROM integrations i
-         JOIN integration_secrets s ON s.integration_id = i.id
-         WHERE i.organization_id = ? AND i.type = ? AND i.is_active = 1`
-      ).get(orgId, 'github');
-
-      if (integration?.encrypted_payload) {
-        try {
-          const decrypted = decryptPayload(JSON.parse(integration.encrypted_payload));
-          githubToken = decrypted?.access_token || decrypted?.token || decrypted?.api_token;
-        } catch (error) {
-          console.error('Failed to decrypt GitHub integration token:', error);
-        }
-      }
+      const integration = getIntegrationRecord(orgId, 'github');
+      githubToken = extractToken(integration?.credentials);
     }
 
     if (provider === 'github' && !githubToken) {
@@ -71,22 +69,8 @@ router.get('/repositories', async (req, res) => {
       return res.json(repositories);
     }
 
-    const gitlabIntegration = db.prepare(
-      `SELECT s.encrypted_payload
-       FROM integrations i
-       JOIN integration_secrets s ON s.integration_id = i.id
-       WHERE i.organization_id = ? AND i.type = ? AND i.is_active = 1`
-    ).get(orgId, 'gitlab');
-
-    let gitlabToken = null;
-    if (gitlabIntegration?.encrypted_payload) {
-      try {
-        const decrypted = decryptPayload(JSON.parse(gitlabIntegration.encrypted_payload));
-        gitlabToken = decrypted?.access_token || decrypted?.token || decrypted?.api_token;
-      } catch (error) {
-        console.error('Failed to decrypt GitLab integration token:', error);
-      }
-    }
+    const gitlabIntegration = getIntegrationRecord(orgId, 'gitlab');
+    const gitlabToken = extractToken(gitlabIntegration?.credentials);
 
     if (!gitlabToken) {
       return res.status(400).json({
@@ -138,6 +122,7 @@ router.get('/repositories', async (req, res) => {
 router.get('/pipelines', async (req, res) => {
   try {
     const userId = req.user.id;
+    const orgId = req.user.organization_id;
     
     // Get projects with their pipelines
     const projects = db.prepare(
@@ -170,7 +155,169 @@ router.get('/pipelines', async (req, res) => {
       };
     });
 
-    res.json(projectsWithDeployments);
+    const pipelines = projectsWithDeployments.map((project) => ({
+      id: project.id,
+      name: project.name,
+      repository_url: project.repository_url,
+      status: mapPipelineStatus(project.deployments?.[0]?.status || project.status),
+      framework: project.framework,
+      cloud_provider: project.cloud_provider,
+      deployments: project.deployments,
+      source: 'project'
+    }));
+
+    const externalPipelines = [];
+
+    const githubIntegration = getIntegrationRecord(orgId, 'github');
+    const githubToken = extractToken(githubIntegration?.credentials);
+    if (githubToken) {
+      try {
+        const octokit = new Octokit({ auth: githubToken });
+        const reposResponse = await octokit.rest.repos.listForAuthenticatedUser({
+          sort: 'updated',
+          per_page: 5
+        });
+
+        const runs = await Promise.all(
+          reposResponse.data.map(async (repo) => {
+            try {
+              const runResponse = await octokit.rest.actions.listWorkflowRunsForRepo({
+                owner: repo.owner.login,
+                repo: repo.name,
+                per_page: 1
+              });
+              const latestRun = runResponse.data.workflow_runs?.[0];
+              if (!latestRun) {
+                return null;
+              }
+              return {
+                id: `github-${latestRun.id}`,
+                name: `${repo.name} / ${latestRun.name || latestRun.display_title || 'Workflow'}`,
+                repository_url: repo.html_url,
+                status: mapPipelineStatus(latestRun.conclusion || latestRun.status),
+                framework: 'github-actions',
+                cloud_provider: 'github',
+                source: 'github'
+              };
+            } catch (error) {
+              console.error('GitHub workflow fetch error:', error);
+              return null;
+            }
+          })
+        );
+
+        externalPipelines.push(...runs.filter(Boolean));
+      } catch (error) {
+        console.error('GitHub pipelines fetch error:', error);
+      }
+    }
+
+    const gitlabIntegration = getIntegrationRecord(orgId, 'gitlab');
+    const gitlabToken = extractToken(gitlabIntegration?.credentials);
+    if (gitlabToken) {
+      try {
+        const projectsResponse = await axios.get('https://gitlab.com/api/v4/projects', {
+          headers: {
+            Authorization: `Bearer ${gitlabToken}`,
+            'PRIVATE-TOKEN': gitlabToken
+          },
+          params: {
+            membership: true,
+            per_page: 5,
+            order_by: 'last_activity_at'
+          }
+        });
+
+        const runs = await Promise.all(
+          projectsResponse.data.map(async (repo) => {
+            try {
+              const pipelinesResponse = await axios.get(
+                `https://gitlab.com/api/v4/projects/${repo.id}/pipelines`,
+                {
+                  headers: {
+                    Authorization: `Bearer ${gitlabToken}`,
+                    'PRIVATE-TOKEN': gitlabToken
+                  },
+                  params: { per_page: 1 }
+                }
+              );
+              const latestPipeline = pipelinesResponse.data?.[0];
+              if (!latestPipeline) {
+                return null;
+              }
+              return {
+                id: `gitlab-${latestPipeline.id}`,
+                name: `${repo.name} / ${latestPipeline.ref}`,
+                repository_url: repo.web_url,
+                status: mapPipelineStatus(latestPipeline.status),
+                framework: 'gitlab-ci',
+                cloud_provider: 'gitlab',
+                source: 'gitlab'
+              };
+            } catch (error) {
+              console.error('GitLab pipeline fetch error:', error);
+              return null;
+            }
+          })
+        );
+
+        externalPipelines.push(...runs.filter(Boolean));
+      } catch (error) {
+        console.error('GitLab pipelines fetch error:', error);
+      }
+    }
+
+    const jenkinsIntegration = getIntegrationRecord(orgId, 'jenkins');
+    if (jenkinsIntegration?.credentials && jenkinsIntegration?.configuration) {
+      const metadata = jenkinsIntegration.configuration?.metadata || {};
+      const baseUrl = metadata.base_url || metadata.url || null;
+      const jobPrefix = metadata.job_prefix || '';
+      const username = jenkinsIntegration.credentials?.username;
+      const apiToken = jenkinsIntegration.credentials?.api_token;
+
+      if (baseUrl && username && apiToken) {
+        try {
+          const jenkinsResponse = await axios.get(
+            `${baseUrl.replace(/\\/$/, '')}/api/json`,
+            {
+              auth: { username, password: apiToken },
+              params: { tree: 'jobs[name,url,color]' }
+            }
+          );
+
+          const jobs = (jenkinsResponse.data?.jobs || [])
+            .filter((job) => !jobPrefix || job.name?.startsWith(jobPrefix))
+            .slice(0, 5)
+            .map((job) => {
+              const color = String(job.color || '');
+              const isAnimating = color.includes('_anime');
+              const status = isAnimating
+                ? 'pending'
+                : color.includes('blue')
+                  ? 'success'
+                  : color.includes('red')
+                    ? 'failed'
+                    : 'pending';
+
+              return {
+                id: `jenkins-${job.name}`,
+                name: job.name,
+                repository_url: job.url,
+                status,
+                framework: 'jenkins',
+                cloud_provider: 'jenkins',
+                source: 'jenkins'
+              };
+            });
+
+          externalPipelines.push(...jobs);
+        } catch (error) {
+          console.error('Jenkins pipeline fetch error:', error);
+        }
+      }
+    }
+
+    res.json([...pipelines, ...externalPipelines]);
   } catch (error) {
     console.error('Pipelines fetch error:', error);
     res.status(500).json({ 

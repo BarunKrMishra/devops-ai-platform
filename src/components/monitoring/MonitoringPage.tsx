@@ -27,16 +27,12 @@ const MonitoringPage: React.FC = () => {
   const [metrics, setMetrics] = useState<any>({});
   const [loading, setLoading] = useState(true);
   const [selectedProject] = useState(1);
+  const [requiresIntegration, setRequiresIntegration] = useState(false);
+  const [loadError, setLoadError] = useState('');
+  const [channels, setChannels] = useState<{ slack?: string; pagerduty?: string }>({});
   const showDemoData = onboarding?.demo_mode !== false;
 
   useEffect(() => {
-    if (!showDemoData) {
-      setAlerts([]);
-      setMetrics({});
-      setLoading(false);
-      return undefined;
-    }
-
     fetchMonitoringData();
     const interval = setInterval(fetchMonitoringData, 30000); // Refresh every 30 seconds
     return () => clearInterval(interval);
@@ -47,20 +43,33 @@ const MonitoringPage: React.FC = () => {
       setLoading(false);
       return;
     }
+    setLoadError('');
     try {
-      const [alertsRes, metricsRes] = await Promise.all([
+      const [alertsRes, metricsRes, integrationsRes] = await Promise.all([
         axios.get(`${API_URL}/api/monitoring/alerts`, {
           headers: { Authorization: `Bearer ${token}` }
         }),
         axios.get(`${API_URL}/api/monitoring/metrics/${selectedProject}`, {
+          headers: { Authorization: `Bearer ${token}` }
+        }),
+        axios.get(`${API_URL}/api/integrations`, {
           headers: { Authorization: `Bearer ${token}` }
         })
       ]);
       
       setAlerts(alertsRes.data);
       setMetrics(metricsRes.data);
+      setRequiresIntegration(Boolean(metricsRes.data?.requires_integration));
+      const list = Array.isArray(integrationsRes.data) ? integrationsRes.data : [];
+      const slack = list.find((item: any) => item.type === 'slack' && item.is_active);
+      const pagerduty = list.find((item: any) => item.type === 'pagerduty' && item.is_active);
+      setChannels({
+        slack: slack?.configuration?.metadata?.workspace || slack?.name,
+        pagerduty: pagerduty?.configuration?.metadata?.service_id || pagerduty?.name
+      });
     } catch (error) {
       console.error('Failed to fetch monitoring data:', error);
+      setLoadError('Unable to load monitoring data. Check your monitoring integrations and try again.');
     } finally {
       setLoading(false);
     }
@@ -123,7 +132,7 @@ const MonitoringPage: React.FC = () => {
     );
   }
 
-  if (!showDemoData) {
+  if (!showDemoData && requiresIntegration) {
     return (
       <div className="pt-20 min-h-screen bg-aikya">
         <div className="container mx-auto px-6 py-8">
@@ -148,6 +157,31 @@ const MonitoringPage: React.FC = () => {
           <h1 className="text-3xl font-bold text-white mb-2">Monitoring & Auto-Healing</h1>
           <p className="text-slate-400">Real-time monitoring with AI-powered incident response</p>
         </div>
+
+        {loadError && (
+          <div className="mb-6 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+            {loadError}
+          </div>
+        )}
+        {metrics?.message && (
+          <div className="mb-6 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
+            {metrics.message}
+          </div>
+        )}
+
+        {(channels.slack || channels.pagerduty) && (
+          <div className="mb-6 rounded-2xl border border-white/10 bg-white/5 px-6 py-4">
+            <h2 className="text-sm font-semibold text-white">Alert channels connected</h2>
+            <div className="mt-2 flex flex-wrap gap-3 text-sm text-slate-300">
+              {channels.slack && (
+                <span className="rounded-full bg-white/10 px-3 py-1">Slack: {channels.slack}</span>
+              )}
+              {channels.pagerduty && (
+                <span className="rounded-full bg-white/10 px-3 py-1">PagerDuty: {channels.pagerduty}</span>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Metrics Overview */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
@@ -294,4 +328,3 @@ const MonitoringPage: React.FC = () => {
 };
 
 export default MonitoringPage;
-

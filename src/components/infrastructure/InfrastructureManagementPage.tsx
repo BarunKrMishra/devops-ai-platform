@@ -12,14 +12,11 @@ const InfrastructureManagementPage: React.FC = () => {
   const [overview, setOverview] = useState<any>({});
   const [loading, setLoading] = useState(true);
   const [selectedProject, setSelectedProject] = useState<number | null>(null);
+  const [requiresIntegration, setRequiresIntegration] = useState(false);
+  const [loadError, setLoadError] = useState('');
   const showDemoData = onboarding?.demo_mode !== false;
 
   useEffect(() => {
-    if (!showDemoData) {
-      setOverview({});
-      setLoading(false);
-      return;
-    }
     fetchInfrastructureData();
   }, [showDemoData, token]);
 
@@ -28,6 +25,7 @@ const InfrastructureManagementPage: React.FC = () => {
       setLoading(false);
       return;
     }
+    setLoadError('');
     try {
       const [overviewRes] = await Promise.all([
         axios.get(`${API_URL}/api/infrastructure/overview`, {
@@ -36,8 +34,10 @@ const InfrastructureManagementPage: React.FC = () => {
       ]);
       
       setOverview(overviewRes.data);
+      setRequiresIntegration(Boolean(overviewRes.data?.requires_integration));
     } catch (error) {
       console.error('Failed to fetch infrastructure data:', error);
+      setLoadError('Unable to load infrastructure data. Check your AWS integration and try again.');
     } finally {
       setLoading(false);
     }
@@ -105,7 +105,7 @@ const InfrastructureManagementPage: React.FC = () => {
     );
   }
 
-  if (!showDemoData) {
+  if (!showDemoData && requiresIntegration) {
     return (
       <div className="pt-20 min-h-screen bg-aikya">
         <div className="container mx-auto px-6 py-8">
@@ -130,6 +130,12 @@ const InfrastructureManagementPage: React.FC = () => {
           <h1 className="text-3xl font-bold text-white mb-2">Infrastructure Management</h1>
           <p className="text-slate-400">Provision and manage your cloud resources with AI assistance</p>
         </div>
+
+        {loadError && (
+          <div className="mb-6 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+            {loadError}
+          </div>
+        )}
 
         {/* Overview Cards */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
@@ -240,4 +246,3 @@ const InfrastructureManagementPage: React.FC = () => {
 };
 
 export default InfrastructureManagementPage;
-

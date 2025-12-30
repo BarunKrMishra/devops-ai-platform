@@ -3,51 +3,117 @@ import { EC2Client, DescribeInstancesCommand, RunInstancesCommand } from '@aws-s
 import { RDSClient, DescribeDBInstancesCommand } from '@aws-sdk/client-rds';
 import { db } from '../database/init.js';
 import { logAuditAction } from '../utils/audit.js';
+import { decryptPayload } from '../utils/encryption.js';
 
 const router = express.Router();
 
-// Initialize AWS clients (in production, use proper credentials)
-const ec2Client = new EC2Client({ 
-  region: process.env.AWS_REGION || 'us-east-1',
-  credentials: {
-    accessKeyId: process.env.AWS_ACCESS_KEY_ID || 'demo',
-    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || 'demo'
+const parseConfig = (value) => {
+  if (!value) {
+    return {};
   }
-});
+  try {
+    return JSON.parse(value);
+  } catch (error) {
+    return {};
+  }
+};
+
+const loadAwsIntegration = (organizationId) => {
+  const row = db.prepare(`
+    SELECT i.configuration, s.encrypted_payload
+    FROM integrations i
+    JOIN integration_secrets s ON s.integration_id = i.id
+    WHERE i.organization_id = ? AND i.type = 'aws' AND i.is_active = 1
+    LIMIT 1
+  `).get(organizationId);
+
+  if (!row) {
+    return null;
+  }
+
+  const configuration = parseConfig(row.configuration);
+  const metadata = configuration.metadata || {};
+  let credentials;
+
+  try {
+    const payload = JSON.parse(row.encrypted_payload);
+    credentials = decryptPayload(payload);
+  } catch (error) {
+    console.error('Failed to decrypt AWS integration payload:', error);
+    return null;
+  }
+
+  if (!credentials?.access_key_id || !credentials?.secret_access_key) {
+    return null;
+  }
+
+  return {
+    region: metadata.region || process.env.AWS_REGION || 'us-east-1',
+    accessKeyId: credentials.access_key_id,
+    secretAccessKey: credentials.secret_access_key,
+    sessionToken: credentials.session_token || null
+  };
+};
+
+const buildAwsClients = (awsConfig) => {
+  const credentials = {
+    accessKeyId: awsConfig.accessKeyId,
+    secretAccessKey: awsConfig.secretAccessKey
+  };
+  if (awsConfig.sessionToken) {
+    credentials.sessionToken = awsConfig.sessionToken;
+  }
+
+  return {
+    ec2Client: new EC2Client({ region: awsConfig.region, credentials }),
+    rdsClient: new RDSClient({ region: awsConfig.region, credentials })
+  };
+};
 
 // Get infrastructure overview with dynamic data
 router.get('/overview', async (req, res) => {
   try {
-    const userId = req.user.id;
-    
-    // Get user's projects
-    const projects = db.prepare('SELECT * FROM projects WHERE user_id = ?').all(userId);
-    
-    // Generate realistic infrastructure overview
-    const overview = {
-      totalResources: Math.floor(20 + Math.random() * 30),
-      activeResources: Math.floor(15 + Math.random() * 20),
-      totalCost: Math.floor(800 + Math.random() * 1200),
-      monthlySavings: Math.floor(100 + Math.random() * 300),
-      regions: ['us-east-1', 'us-west-2', 'eu-west-1', 'ap-southeast-1'],
-      services: {
-        compute: Math.floor(8 + Math.random() * 12),
-        storage: Math.floor(5 + Math.random() * 8),
-        database: Math.floor(3 + Math.random() * 5),
-        network: Math.floor(2 + Math.random() * 4)
-      },
-      health: {
-        healthy: Math.floor(12 + Math.random() * 15),
-        warning: Math.floor(1 + Math.random() * 3),
-        critical: Math.floor(0 + Math.random() * 2)
-      },
-      lastUpdated: new Date().toISOString()
-    };
+    const organizationId = req.user.organization_id;
+    const awsIntegration = loadAwsIntegration(organizationId);
 
-    res.json(overview);
+    if (!awsIntegration) {
+      const demoOverview = {
+        data_source: 'demo',
+        requires_integration: true,
+        totalInstances: Math.floor(3 + Math.random() * 8),
+        totalDatabases: Math.floor(1 + Math.random() * 4),
+        monthlyCost: Math.floor(400 + Math.random() * 600),
+        lastUpdated: new Date().toISOString()
+      };
+
+      return res.json(demoOverview);
+    }
+
+    const { ec2Client, rdsClient } = buildAwsClients(awsIntegration);
+    const [instancesResponse, rdsResponse] = await Promise.all([
+      ec2Client.send(new DescribeInstancesCommand({})),
+      rdsClient.send(new DescribeDBInstancesCommand({}))
+    ]);
+
+    const totalInstances = (instancesResponse.Reservations || []).reduce((sum, reservation) => {
+      return sum + (reservation.Instances?.length || 0);
+    }, 0);
+
+    const totalDatabases = (rdsResponse.DBInstances || []).length;
+    const monthlyCost = totalInstances * 25 + totalDatabases * 40;
+
+    res.json({
+      data_source: 'aws',
+      requires_integration: false,
+      region: awsIntegration.region,
+      totalInstances,
+      totalDatabases,
+      monthlyCost,
+      lastUpdated: new Date().toISOString()
+    });
   } catch (error) {
     console.error('Infrastructure overview error:', error);
-    res.status(500).json({ error: 'Failed to fetch infrastructure overview' });
+    res.status(502).json({ error: 'Failed to fetch infrastructure overview. Check AWS credentials or region.' });
   }
 });
 
