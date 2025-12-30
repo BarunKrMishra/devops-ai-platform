@@ -131,6 +131,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         password,
         ...(twoFactorToken ? { twoFactorToken } : {})
       });
+      if (response.data?.twoFactorRequired) {
+        throw new Error(response.data?.message || response.data?.error || 'OTP sent to email');
+      }
       const { token: newToken, user: userData } = response.data;
       setToken(newToken);
       setUser(userData);
@@ -138,9 +141,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       axios.defaults.headers.common['Authorization'] = `Bearer ${newToken}`;
       await refreshOnboarding(newToken);
     } catch (error: any) {
-      console.error('Frontend login error:', error, error.response?.data);
-      const message = error.response?.data?.error || 'Login failed';
-      throw new Error(message);
+      const message = error?.message || '';
+      if (!message.includes('OTP sent to email')) {
+        console.error('Frontend login error:', error, error.response?.data);
+      }
+      const responseMessage = error.response?.data?.error || 'Login failed';
+      throw new Error(message || responseMessage);
     }
   };
 
@@ -152,7 +158,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         role,
         ...(twoFactorToken ? { twoFactorToken } : {})
       });
-      
+
+      if (response.data?.twoFactorRequired) {
+        throw new Error(response.data?.message || response.data?.error || 'OTP sent to email to complete registration');
+      }
+
       const { token: newToken, user: userData } = response.data;
       setToken(newToken);
       setUser(userData);
@@ -160,7 +170,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       axios.defaults.headers.common['Authorization'] = `Bearer ${newToken}`;
       await refreshOnboarding(newToken);
     } catch (error: any) {
-      const message = error.response?.data?.error || 'Registration failed';
+      const message = error?.message || '';
+      if (!message.includes('OTP sent to email')) {
+        const responseMessage = error.response?.data?.error || 'Registration failed';
+        throw new Error(responseMessage);
+      }
       throw new Error(message);
     }
   };

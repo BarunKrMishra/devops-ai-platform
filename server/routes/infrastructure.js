@@ -178,10 +178,11 @@ router.get('/resources', async (req, res) => {
 router.post('/provision', async (req, res) => {
   try {
     const { projectId, resourceType, configuration } = req.body;
-    const userId = req.user.id;
+    const organizationId = req.user.organization_id;
 
-    // Validate project ownership
-    const project = db.prepare('SELECT * FROM projects WHERE id = ? AND user_id = ?').get(projectId, userId);
+    // Validate project ownership (org scoped)
+    const project = db.prepare('SELECT * FROM projects WHERE id = ? AND organization_id = ?')
+      .get(projectId, organizationId);
     if (!project) {
       return res.status(404).json({ error: 'Project not found' });
     }

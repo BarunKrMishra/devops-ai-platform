@@ -260,10 +260,11 @@ router.post('/register', async (req, res) => {
         });
       }
 
-      return res.status(403).json({ 
-        error: 'OTP sent to email to complete registration', 
+      return res.status(200).json({
+        twoFactorRequired: true,
         method: 'email',
-        tempUserId: tempUserId 
+        message: 'OTP sent to email to complete registration',
+        tempUserId: tempUserId
       });
     }
 
@@ -411,7 +412,11 @@ router.post('/login', async (req, res) => {
         console.error('Nodemailer error:', e);
         return res.status(500).json({ error: 'Failed to send OTP email', method: 'email' });
       }
-      return res.status(403).json({ error: 'OTP sent to email', method: 'email' });
+      return res.status(200).json({
+        twoFactorRequired: true,
+        method: 'email',
+        message: 'OTP sent to email'
+      });
     }
     // Verify 2FA token - try email OTP first, then TOTP
     let verified = false;

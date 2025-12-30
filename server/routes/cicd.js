@@ -39,9 +39,7 @@ router.get('/repositories', async (req, res) => {
     }
 
     if (provider === 'github' && !githubToken) {
-      return res.status(400).json({
-        error: 'GitHub integration not configured. Connect GitHub in Integrations first.'
-      });
+      return res.json([]);
     }
 
     if (provider === 'github') {
@@ -73,9 +71,7 @@ router.get('/repositories', async (req, res) => {
     const gitlabToken = extractToken(gitlabIntegration?.credentials);
 
     if (!gitlabToken) {
-      return res.status(400).json({
-        error: 'GitLab integration not configured. Connect GitLab in Integrations first.'
-      });
+      return res.json([]);
     }
 
     const gitlabResponse = await axios.get('https://gitlab.com/api/v4/projects', {

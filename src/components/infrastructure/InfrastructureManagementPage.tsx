@@ -14,6 +14,8 @@ const InfrastructureManagementPage: React.FC = () => {
   const [selectedProject, setSelectedProject] = useState<number | null>(null);
   const [requiresIntegration, setRequiresIntegration] = useState(false);
   const [loadError, setLoadError] = useState('');
+  const [projects, setProjects] = useState<{ id: number; name: string }[]>([]);
+  const [projectNotice, setProjectNotice] = useState('');
   const showDemoData = onboarding?.demo_mode !== false;
 
   useEffect(() => {
@@ -27,14 +29,33 @@ const InfrastructureManagementPage: React.FC = () => {
     }
     setLoadError('');
     try {
-      const [overviewRes] = await Promise.all([
+      const [overviewRes, pipelinesRes] = await Promise.all([
         axios.get(`${API_URL}/api/infrastructure/overview`, {
+          headers: { Authorization: `Bearer ${token}` }
+        }),
+        axios.get(`${API_URL}/api/cicd/pipelines`, {
           headers: { Authorization: `Bearer ${token}` }
         })
       ]);
-      
+
       setOverview(overviewRes.data);
       setRequiresIntegration(Boolean(overviewRes.data?.requires_integration));
+
+      const pipelineList = Array.isArray(pipelinesRes.data) ? pipelinesRes.data : [];
+      const projectPipelines = pipelineList.filter((item) => item.source === 'project');
+      const mappedProjects = projectPipelines.map((item) => ({
+        id: item.id,
+        name: item.name || item.repository_url || `Project ${item.id}`
+      }));
+      setProjects(mappedProjects);
+      if (!selectedProject && mappedProjects.length > 0) {
+        setSelectedProject(mappedProjects[0].id);
+      }
+      if (mappedProjects.length === 0) {
+        setProjectNotice('Create a CI/CD pipeline to enable resource provisioning.');
+      } else {
+        setProjectNotice('');
+      }
     } catch (error) {
       console.error('Failed to fetch infrastructure data:', error);
       setLoadError('Unable to load infrastructure data. Check your AWS integration and try again.');
@@ -44,7 +65,10 @@ const InfrastructureManagementPage: React.FC = () => {
   };
 
   const handleProvisionResource = async (resourceType: string, configuration: any) => {
-    if (!selectedProject) return;
+    if (!selectedProject) {
+      setLoadError('Select a project before provisioning resources.');
+      return;
+    }
 
     try {
       await axios.post(
@@ -62,6 +86,7 @@ const InfrastructureManagementPage: React.FC = () => {
       fetchInfrastructureData();
     } catch (error) {
       console.error('Failed to provision resource:', error);
+      setLoadError('Provisioning failed. Make sure a project exists and try again.');
     }
   };
 
@@ -180,13 +205,34 @@ const InfrastructureManagementPage: React.FC = () => {
         <div className="bg-white/10 backdrop-blur-sm rounded-2xl border border-white/20 p-8 mb-8">
           <div className="flex items-center justify-between mb-6">
             <h2 className="text-xl font-semibold text-white">Provision New Resources</h2>
-            <button
-              onClick={() => setSelectedProject(1)}
-              className="flex items-center space-x-2 px-4 py-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600 transition-colors"
-            >
-              <Plus className="h-4 w-4" />
-              <span>Add Resource</span>
-            </button>
+            <div className="flex items-center gap-3">
+              {projects.length > 0 ? (
+                <select
+                  value={selectedProject ?? ''}
+                  onChange={(event) => setSelectedProject(Number(event.target.value))}
+                  className="px-3 py-2 rounded-lg bg-white/10 border border-white/20 text-white focus:border-amber-400 focus:outline-none"
+                >
+                  {projects.map((project) => (
+                    <option key={project.id} value={project.id} className="bg-slate-900 text-slate-100">
+                      {project.name}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <span className="text-xs text-slate-400">{projectNotice || 'No project found yet.'}</span>
+              )}
+              <button
+                onClick={() => {
+                  if (!selectedProject) {
+                    setLoadError('Create a pipeline first to provision resources.');
+                  }
+                }}
+                className="flex items-center space-x-2 px-4 py-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600 transition-colors"
+              >
+                <Plus className="h-4 w-4" />
+                <span>Add Resource</span>
+              </button>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -195,7 +241,10 @@ const InfrastructureManagementPage: React.FC = () => {
                 key={resource.type}
                 className="bg-white/5 rounded-xl p-6 border border-white/10 hover:bg-white/10 transition-all cursor-pointer"
                 onClick={() => {
-                  setSelectedProject(1);
+                  if (!selectedProject) {
+                    setLoadError('Create a pipeline first to provision resources.');
+                    return;
+                  }
                   handleProvisionResource(resource.type, {
                     instanceType: resource.type === 'ec2' ? 't3.micro' : undefined,
                     instanceClass: resource.type === 'rds' ? 'db.t3.micro' : undefined,
