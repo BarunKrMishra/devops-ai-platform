@@ -278,7 +278,7 @@ router.get('/pipelines', async (req, res) => {
       if (baseUrl && username && apiToken) {
         try {
           const jenkinsResponse = await axios.get(
-            `${baseUrl.replace(/\\/$/, '')}/api/json`,
+            `${baseUrl.replace(/\/$/, '')}/api/json`,
             {
               auth: { username, password: apiToken },
               params: { tree: 'jobs[name,url,color]' }

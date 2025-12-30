@@ -132,7 +132,7 @@ const fetchPrometheusMetrics = async (credentials) => {
   const now = Math.floor(Date.now() / 1000);
   const from = now - 60 * 60 * 24;
   const step = 3600;
-  const baseUrl = endpoint.replace(/\\/$/, '');
+  const baseUrl = endpoint.replace(/\/$/, '');
 
   const headers = credentials?.bearer_token
     ? { Authorization: `Bearer ${credentials.bearer_token}` }
@@ -169,7 +169,7 @@ const fetchGrafanaMetrics = async (credentials) => {
   }
 
   try {
-    await axios.get(`${credentials.url.replace(/\\/$/, '')}/api/health`, {
+    await axios.get(`${credentials.url.replace(/\/$/, '')}/api/health`, {
       headers: { Authorization: `Bearer ${credentials.api_token}` }
     });
   } catch (error) {
@@ -225,7 +225,7 @@ const fetchPrometheusAlerts = async (credentials) => {
     ? { Authorization: `Bearer ${credentials.bearer_token}` }
     : undefined;
 
-  const response = await axios.get(`${endpoint.replace(/\\/$/, '')}/api/v1/alerts`, { headers });
+  const response = await axios.get(`${endpoint.replace(/\/$/, '')}/api/v1/alerts`, { headers });
   const alerts = response.data?.data?.alerts || [];
 
   return alerts.slice(0, 5).map((alert, index) => ({
@@ -243,7 +243,7 @@ const fetchGrafanaAlerts = async (credentials) => {
     return [];
   }
 
-  const baseUrl = credentials.url.replace(/\\/$/, '');
+  const baseUrl = credentials.url.replace(/\/$/, '');
   const response = await axios.get(`${baseUrl}/api/alerts`, {
     headers: { Authorization: `Bearer ${credentials.api_token}` }
   });
