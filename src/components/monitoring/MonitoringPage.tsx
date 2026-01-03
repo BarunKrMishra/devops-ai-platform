@@ -30,6 +30,9 @@ const MonitoringPage: React.FC = () => {
   const [requiresIntegration, setRequiresIntegration] = useState(false);
   const [loadError, setLoadError] = useState('');
   const [channels, setChannels] = useState<{ slack?: string; pagerduty?: string }>({});
+  const [monitoringSources, setMonitoringSources] = useState<
+    { type: string; label: string; connected: boolean }[]
+  >([]);
   const showDemoData = onboarding?.demo_mode !== false;
 
   useEffect(() => {
@@ -67,6 +70,11 @@ const MonitoringPage: React.FC = () => {
         slack: slack?.configuration?.metadata?.workspace || slack?.name,
         pagerduty: pagerduty?.configuration?.metadata?.service_id || pagerduty?.name
       });
+      setMonitoringSources([
+        { type: 'datadog', label: 'Datadog', connected: Boolean(list.find((item: any) => item.type === 'datadog' && item.is_active)) },
+        { type: 'prometheus', label: 'Prometheus', connected: Boolean(list.find((item: any) => item.type === 'prometheus' && item.is_active)) },
+        { type: 'grafana', label: 'Grafana', connected: Boolean(list.find((item: any) => item.type === 'grafana' && item.is_active)) }
+      ]);
     } catch (error) {
       console.error('Failed to fetch monitoring data:', error);
       setLoadError('Unable to load monitoring data. Check your monitoring integrations and try again.');
@@ -132,24 +140,6 @@ const MonitoringPage: React.FC = () => {
     );
   }
 
-  if (!showDemoData && requiresIntegration) {
-    return (
-      <div className="pt-20 min-h-screen bg-aikya">
-        <div className="container mx-auto px-6 py-8">
-          <div className="mb-8">
-            <h1 className="text-3xl font-bold text-white mb-2">Monitoring & Auto-Healing</h1>
-            <p className="text-slate-400">Live monitoring data will appear once integrations are connected.</p>
-          </div>
-          <EmptyState
-            title="Waiting for live monitoring data"
-            message="Connect your monitoring stack or include data sources in the go-live request to begin streaming alerts."
-            icon={Sparkles}
-          />
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="pt-20 min-h-screen bg-aikya">
       <div className="container mx-auto px-6 py-8">
@@ -168,6 +158,24 @@ const MonitoringPage: React.FC = () => {
             {metrics.message}
           </div>
         )}
+        {metrics?.guidance && (
+          <div className="mb-6 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-300">
+            {metrics.guidance}
+          </div>
+        )}
+
+        {metrics?.expected_metrics?.length > 0 && (
+          <div className="mb-6 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-300">
+            <p className="text-xs uppercase tracking-[0.3em] text-slate-400 mb-2">Expected metrics</p>
+            <div className="flex flex-wrap gap-2">
+              {metrics.expected_metrics.map((metric: string) => (
+                <span key={metric} className="rounded-full bg-white/10 px-3 py-1 text-xs text-slate-200">
+                  {metric}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
 
         {(channels.slack || channels.pagerduty) && (
           <div className="mb-6 rounded-2xl border border-white/10 bg-white/5 px-6 py-4">
@@ -183,8 +191,39 @@ const MonitoringPage: React.FC = () => {
           </div>
         )}
 
+        {monitoringSources.length > 0 && (
+          <div className="mb-6 rounded-2xl border border-white/10 bg-white/5 px-6 py-4">
+            <h2 className="text-sm font-semibold text-white">Monitoring sources</h2>
+            <div className="mt-2 flex flex-wrap gap-3 text-sm text-slate-300">
+              {monitoringSources.map((source) => {
+                const isActive = metrics?.data_source === source.type && metrics?.data_available !== false;
+                const status = source.connected ? (isActive ? 'Active' : 'Connected') : 'Not connected';
+                return (
+                  <span
+                    key={source.type}
+                    className="rounded-full bg-white/10 px-3 py-1"
+                  >
+                    {source.label}: {status}
+                  </span>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {requiresIntegration && (
+          <div className="mb-8">
+            <EmptyState
+              title="Waiting for live monitoring data"
+              message="Connect Datadog or Prometheus to populate live metrics in Aikya."
+              icon={Sparkles}
+            />
+          </div>
+        )}
+
         {/* Metrics Overview */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+        {!requiresIntegration && metrics?.data_available !== false && (
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
           <div className="bg-teal-500/10 border border-teal-500/20 rounded-xl p-6">
             <div className="flex items-center justify-between mb-4">
               <Activity className="h-8 w-8 text-teal-400" />
@@ -221,9 +260,11 @@ const MonitoringPage: React.FC = () => {
             <p className="text-xs text-slate-400 mt-1">Average</p>
           </div>
         </div>
+        )}
 
         {/* Alerts Section */}
-        <div className="bg-white/10 backdrop-blur-sm rounded-2xl border border-white/20 p-8 mb-8">
+        {!requiresIntegration && (
+          <div className="bg-white/10 backdrop-blur-sm rounded-2xl border border-white/20 p-8 mb-8">
           <div className="flex items-center justify-between mb-6">
             <h2 className="text-xl font-semibold text-white">Active Alerts</h2>
             <div className="flex items-center space-x-2">
@@ -272,9 +313,11 @@ const MonitoringPage: React.FC = () => {
             ))}
           </div>
         </div>
+        )}
 
         {/* Metrics Charts */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+        {!requiresIntegration && metrics?.data_available !== false && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
           <div className="bg-white/10 backdrop-blur-sm rounded-2xl border border-white/20 p-6">
             <h3 className="text-lg font-semibold text-white mb-4">CPU Usage (24h)</h3>
             <div className="h-48 flex items-end justify-between space-x-1">
@@ -303,9 +346,11 @@ const MonitoringPage: React.FC = () => {
             </div>
           </div>
         </div>
+        )}
 
         {/* Auto-Healing Status */}
-        <div className="mt-8 bg-gradient-to-r from-amber-500/10 to-teal-500/10 rounded-xl p-6 border border-white/10">
+        {!requiresIntegration && metrics?.data_available !== false && (
+          <div className="mt-8 bg-gradient-to-r from-amber-500/10 to-teal-500/10 rounded-xl p-6 border border-white/10">
           <h3 className="text-lg font-semibold text-white mb-4">AI Auto-Healing Status</h3>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="text-center">
@@ -322,6 +367,7 @@ const MonitoringPage: React.FC = () => {
             </div>
           </div>
         </div>
+        )}
       </div>
     </div>
   );

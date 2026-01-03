@@ -5,7 +5,8 @@ import AIAssistant from './dashboard/AIAssistant';
 import PipelineOverview from './dashboard/PipelineOverview';
 import InfrastructureMap from './dashboard/InfrastructureMap';
 import CostOptimization from './dashboard/CostOptimization';
-import { BarChart3, Cloud, MessageSquare, DollarSign, Activity, Settings, Sparkles, CheckCircle, Circle } from 'lucide-react';
+import MonitoringSnapshot from './dashboard/MonitoringSnapshot';
+import { BarChart3, Cloud, MessageSquare, DollarSign, Settings, Sparkles, CheckCircle, Circle } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import EmptyState from './ui/EmptyState';
 
@@ -484,18 +485,7 @@ const Dashboard: React.FC = () => {
                 )
             )}
             {activeTab === 'monitoring' && (
-              showDemoData ? (
-                <div className="text-center py-12">
-                  <Activity className="h-16 w-16 text-slate-600 mx-auto mb-4" />
-                  <h3 className="text-xl font-semibold text-white mb-2">Monitoring Dashboard</h3>
-                  <p className="text-slate-400">Real-time monitoring and alerts coming soon</p>
-                </div>
-              ) : (
-                <LiveDataPlaceholder
-                  title="Monitoring streams are queued"
-                  message="As soon as monitoring tools are connected, alerts and incidents will show up here."
-                />
-              )
+              <MonitoringSnapshot />
             )}
             {activeTab === 'settings' && (
               <div className="text-center py-12">

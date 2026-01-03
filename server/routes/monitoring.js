@@ -58,6 +58,23 @@ function generateRealisticMetrics() {
   return metrics;
 }
 
+const formatSourceLabel = (source) =>
+  source ? source.charAt(0).toUpperCase() + source.slice(1) : 'Provider';
+
+const buildNoDataResponse = (source, guidance, expectedMetrics = []) => ({
+  data_source: source,
+  data_available: false,
+  requires_integration: false,
+  message: `${formatSourceLabel(source)} connected but no metrics were found.`,
+  guidance,
+  expected_metrics: expectedMetrics,
+  cpu: [],
+  memory: [],
+  responseTime: [],
+  uptime: 99.9,
+  lastUpdated: new Date().toISOString()
+});
+
 const buildHourlySeries = (points = []) => {
   return points
     .filter((point) => Array.isArray(point) && point.length >= 2 && point[1] !== null)
@@ -113,8 +130,19 @@ const fetchDatadogMetrics = async (credentials, metadata) => {
   }));
   const responseTime = buildHourlySeries(responsePoints);
 
+  const hasData = cpu.length > 0 || memory.length > 0 || responseTime.length > 0;
+  if (!hasData) {
+    return buildNoDataResponse(
+      'datadog',
+      'Ensure the Datadog agent is installed and system metrics are flowing into your Datadog account.',
+      ['system.cpu.user', 'system.mem.pct_usable', 'trace.http.request.duration']
+    );
+  }
+
   return {
     data_source: 'datadog',
+    data_available: true,
+    requires_integration: false,
     cpu,
     memory,
     responseTime,
@@ -153,11 +181,26 @@ const fetchPrometheusMetrics = async (credentials) => {
     queryRange('histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le))')
   ]);
 
+  const cpu = buildHourlySeries(cpuPoints);
+  const memory = buildHourlySeries(memPoints);
+  const responseTime = buildHourlySeries(responsePoints);
+
+  const hasData = cpu.length > 0 || memory.length > 0 || responseTime.length > 0;
+  if (!hasData) {
+    return buildNoDataResponse(
+      'prometheus',
+      'Prometheus is reachable, but node-exporter metrics are missing. Install node_exporter and add a scrape job.',
+      ['node_cpu_seconds_total', 'node_memory_MemAvailable_bytes', 'http_request_duration_seconds_bucket']
+    );
+  }
+
   return {
     data_source: 'prometheus',
-    cpu: buildHourlySeries(cpuPoints),
-    memory: buildHourlySeries(memPoints),
-    responseTime: buildHourlySeries(responsePoints),
+    data_available: true,
+    requires_integration: false,
+    cpu,
+    memory,
+    responseTime,
     uptime: 99.9,
     lastUpdated: new Date().toISOString()
   };
@@ -176,15 +219,11 @@ const fetchGrafanaMetrics = async (credentials) => {
     return null;
   }
 
-  return {
-    data_source: 'grafana',
-    cpu: [],
-    memory: [],
-    responseTime: [],
-    uptime: 99.9,
-    lastUpdated: new Date().toISOString(),
-    message: 'Grafana connected. Configure a metrics data source to display charts.'
-  };
+  return buildNoDataResponse(
+    'grafana',
+    'Grafana is connected. Configure a Prometheus or Datadog data source and panels to show charts.',
+    []
+  );
 };
 
 const fetchDatadogAlerts = async (credentials, metadata) => {
@@ -298,27 +337,41 @@ router.get('/metrics/:projectId', async (req, res) => {
     let metrics = null;
 
     if (datadogIntegration?.credentials) {
-      metrics = await fetchDatadogMetrics(
-        datadogIntegration.credentials,
-        datadogIntegration.configuration?.metadata
-      );
+      try {
+        metrics = await fetchDatadogMetrics(
+          datadogIntegration.credentials,
+          datadogIntegration.configuration?.metadata
+        );
+      } catch (error) {
+        console.error('Datadog metrics fetch error:', error);
+      }
     }
 
     if (!metrics && prometheusIntegration?.credentials) {
-      metrics = await fetchPrometheusMetrics(prometheusIntegration.credentials);
+      try {
+        metrics = await fetchPrometheusMetrics(prometheusIntegration.credentials);
+      } catch (error) {
+        console.error('Prometheus metrics fetch error:', error);
+      }
     }
 
     if (!metrics && grafanaIntegration?.credentials) {
-      metrics = await fetchGrafanaMetrics(grafanaIntegration.credentials);
+      try {
+        metrics = await fetchGrafanaMetrics(grafanaIntegration.credentials);
+      } catch (error) {
+        console.error('Grafana metrics fetch error:', error);
+      }
     }
 
     if (!metrics) {
       metrics = {
         ...generateRealisticMetrics(),
         data_source: 'demo',
-        requires_integration: true
+        data_available: false,
+        requires_integration: true,
+        message: 'No monitoring integrations connected yet.'
       };
-    } else {
+    } else if (metrics.requires_integration === undefined) {
       metrics.requires_integration = false;
     }
 
