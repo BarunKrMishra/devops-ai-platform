@@ -2,7 +2,8 @@ import '../config/env.js';
 import express from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import { db } from '../database/init.js';
+import { Op } from 'sequelize';
+import { Organization, User, OrganizationInvite, Team, TeamMember, LoginAttempt } from '../models/index.js';
 import axios from 'axios';
 import { authenticateToken } from '../middleware/auth.js';
 import { logAuditAction } from '../utils/audit.js';
@@ -23,8 +24,21 @@ const getJwtSecret = () => {
   return JWT_SECRET;
 };
 
+// Constant-time string comparison to avoid timing attacks on OTP checks.
+const timingSafeEqualStr = (a, b) => {
+  if (typeof a !== 'string' || typeof b !== 'string') {
+    return false;
+  }
+  const ab = Buffer.from(a);
+  const bb = Buffer.from(b);
+  if (ab.length !== bb.length) {
+    return false;
+  }
+  return crypto.timingSafeEqual(ab, bb);
+};
+
 // Allowed roles for registration
-const ALLOWED_ROLES = ['developer', 'manager', 'user'];
+const ALLOWED_ROLES = ['admin', 'manager', 'developer', 'user', 'viewer'];
 
 const normalizeSlug = (value) => {
   return value
@@ -33,22 +47,19 @@ const normalizeSlug = (value) => {
     .replace(/^-+|-+$/g, '');
 };
 
-const createOrganizationForEmail = (email) => {
+const createOrganizationForEmail = async (email) => {
   const domain = email.split('@')[1] || '';
   const base = normalizeSlug(domain || email.split('@')[0] || 'workspace');
   let slug = base || 'workspace';
 
-  const existing = db.prepare('SELECT id FROM organizations WHERE slug = ?').get(slug);
+  const existing = await Organization.findOne({ where: { slug }, raw: true });
   if (existing) {
     slug = `${slug}-${crypto.randomBytes(3).toString('hex')}`;
   }
 
   const name = domain ? `${domain} workspace` : 'Aikya workspace';
-  const result = db.prepare(
-    'INSERT INTO organizations (name, slug, plan) VALUES (?, ?, ?)'
-  ).run(name, slug, 'free');
-
-  return result.lastInsertRowid;
+  const organization = await Organization.create({ name, slug, plan: 'free' });
+  return organization.id;
 };
 
 // Email transporter setup (use environment variables in production)
@@ -72,7 +83,6 @@ if (transporter) {
 async function sendEmailWithFallback(emailOptions) {
   if (!transporter) {
     console.log('Email not sent - transporter not configured. Email options:', emailOptions);
-    // In development, just log the OTP instead of sending email
     if (NODE_ENV === 'development') {
       console.log(`[DEV MODE] Email would be sent to ${emailOptions.to}:`);
       console.log(`[DEV MODE] Subject: ${emailOptions.subject}`);
@@ -81,7 +91,7 @@ async function sendEmailWithFallback(emailOptions) {
     }
     throw new Error('Email service not configured');
   }
-  
+
   const maxAttempts = 3;
   let attempt = 0;
 
@@ -124,32 +134,89 @@ function logUserContact(email, action) {
   });
 }
 
-function acceptPendingInvite(invite, userId) {
+async function acceptPendingInvite(invite, userId) {
   if (!invite) {
     return;
   }
   try {
-    const teamIds = JSON.parse(invite.team_ids || '[]');
-    if (Array.isArray(teamIds) && teamIds.length > 0) {
-      const teams = db.prepare(`
-        SELECT id FROM teams WHERE organization_id = ? AND id IN (${teamIds.map(() => '?').join(',')})
-      `).all(invite.organization_id, ...teamIds);
-      teams.forEach((team) => {
-        db.prepare(`
-          INSERT OR IGNORE INTO team_members (team_id, user_id, role)
-          VALUES (?, ?, 'member')
-        `).run(team.id, userId);
+    const teamIds = Array.isArray(invite.team_ids) ? invite.team_ids : [];
+    if (teamIds.length > 0) {
+      const teams = await Team.findAll({
+        where: {
+          organization_id: invite.organization_id,
+          id: { [Op.in]: teamIds }
+        },
+        attributes: ['id'],
+        raw: true
       });
+
+      for (const team of teams) {
+        await TeamMember.findOrCreate({
+          where: { team_id: team.id, user_id: userId },
+          defaults: { organization_id: invite.organization_id, role: 'member' }
+        });
+      }
     }
-    db.prepare(`
-      UPDATE organization_invites
-      SET status = 'accepted', accepted_at = CURRENT_TIMESTAMP
-      WHERE id = ?
-    `).run(invite.id);
+
+    await OrganizationInvite.update(
+      { status: 'accepted', accepted_at: new Date() },
+      { where: { id: invite.id } }
+    );
   } catch (inviteError) {
     console.error('Invite acceptance failed:', inviteError);
   }
 }
+
+const upsertGitHubUser = async ({ githubId, email, name, accessToken }) => {
+  let user = await User.findOne({ where: { github_id: githubId } });
+  if (user) {
+    await User.update({ github_token: accessToken }, { where: { id: user.id } });
+    return user;
+  }
+
+  const existingByEmail = await User.findOne({ where: { email } });
+  if (existingByEmail) {
+    await User.update(
+      {
+        github_id: githubId,
+        github_token: accessToken,
+        name: existingByEmail.name || name
+      },
+      { where: { id: existingByEmail.id } }
+    );
+    return existingByEmail;
+  }
+
+  const pendingInvite = await OrganizationInvite.findOne({
+    where: {
+      email,
+      status: 'pending',
+      [Op.or]: [{ expires_at: null }, { expires_at: { [Op.gt]: new Date() } }]
+    }
+  });
+
+  const resolvedRole = pendingInvite ? pendingInvite.role : 'admin';
+  const resolvedOrganizationId = pendingInvite
+    ? pendingInvite.organization_id
+    : await createOrganizationForEmail(email);
+
+  const secret = speakeasy.generateSecret({ name: `Aikya (${email})` });
+
+  user = await User.create({
+    email,
+    github_id: githubId,
+    role: resolvedRole,
+    organization_id: resolvedOrganizationId,
+    is_active: true,
+    two_factor_secret: secret.base32,
+    github_token: accessToken,
+    name
+  });
+
+  await acceptPendingInvite(pendingInvite, user.id);
+
+  return user;
+};
 
 // Register
 router.post('/register', async (req, res) => {
@@ -160,72 +227,87 @@ router.post('/register', async (req, res) => {
       return res.status(400).json({ error: 'Email and password are required' });
     }
 
-    // Clean up any old pending user with this email
     if (!twoFactorToken) {
-      db.prepare('DELETE FROM users WHERE email = ? AND is_active = 0').run(email);
+      await User.destroy({ where: { email, is_active: false } });
     }
 
-    // Basic email validation
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
       return res.status(400).json({ error: 'Invalid email format' });
     }
 
-    // Password strength validation
+    const defaultName = email.split('@')[0];
+
     if (password.length < 8) {
       return res.status(400).json({ error: 'Password must be at least 8 characters long' });
     }
 
-    // Validate role
     if (!ALLOWED_ROLES.includes(role)) {
       return res.status(400).json({ error: 'Invalid role' });
     }
 
-    // Check if user exists
-    const existingUser = db.prepare('SELECT * FROM users WHERE email = ? AND is_active = 1').get(email);
+    const existingUser = await User.findOne({ where: { email, is_active: true }, raw: true });
     if (existingUser) {
       return res.status(400).json({ error: 'User already exists' });
     }
 
-    const pendingInvite = db.prepare(`
-      SELECT * FROM organization_invites
-      WHERE email = ? AND status = 'pending' AND (expires_at IS NULL OR datetime(expires_at) > datetime('now'))
-    `).get(email);
+    const pendingInvite = await OrganizationInvite.findOne({
+      where: {
+        email,
+        status: 'pending',
+        [Op.or]: [{ expires_at: null }, { expires_at: { [Op.gt]: new Date() } }]
+      }
+    });
 
     let resolvedOrganizationId = pendingInvite ? pendingInvite.organization_id : null;
-    let resolvedRole = pendingInvite ? pendingInvite.role : 'manager';
+    let resolvedRole = pendingInvite ? pendingInvite.role : 'admin';
     let createdOrganizationId = null;
+    let tempUser = null;
+
+    if (twoFactorToken) {
+      tempUser = await User.findOne({ where: { email, is_active: false } });
+      if (tempUser) {
+        resolvedOrganizationId = tempUser.organization_id;
+        resolvedRole = tempUser.role || resolvedRole;
+      }
+    }
 
     if (!pendingInvite && !twoFactorToken) {
-      createdOrganizationId = createOrganizationForEmail(email);
+      createdOrganizationId = await createOrganizationForEmail(email);
       resolvedOrganizationId = createdOrganizationId;
     }
 
-    // Hash password
+    if (!resolvedOrganizationId && !twoFactorToken) {
+      return res.status(400).json({ error: 'Organization could not be resolved for this registration.' });
+    }
+
     const passwordHash = await bcrypt.hash(password, 12);
 
     let secret = null;
     let qr = null;
-    if (twoFactorMethod === 'totp') {
-      secret = speakeasy.generateSecret({ name: `DevOpsAI (${email})` });
+    if (twoFactorMethod === 'totp' && !twoFactorToken) {
+      secret = speakeasy.generateSecret({ name: `Aikya (${email})` });
       qr = await qrcode.toDataURL(secret.otpauth_url);
     }
 
-    // If no 2FA token provided, create temporary user and send OTP
     if (!twoFactorToken) {
-      // Create temporary user with pending status
-      const result = db.prepare(
-        'INSERT INTO users (email, password_hash, role, organization_id, two_factor_enabled, two_factor_secret, two_factor_method, is_active) VALUES (?, ?, ?, ?, 1, ?, ?, 0)'
-      ).run(email, passwordHash, resolvedRole, resolvedOrganizationId, secret ? secret.base32 : null, twoFactorMethod);
+      const tempUser = await User.create({
+        email,
+        password_hash: passwordHash,
+        role: resolvedRole,
+        organization_id: resolvedOrganizationId,
+        two_factor_enabled: true,
+        two_factor_secret: secret ? secret.base32 : null,
+        two_factor_method: twoFactorMethod,
+        is_active: false,
+        name: defaultName
+      });
 
-      const tempUserId = result.lastInsertRowid;
-
-      // Generate OTP and send email
       const otp = (Math.floor(100000 + Math.random() * 900000)).toString();
-      const expiry = new Date(Date.now() + 10 * 60 * 1000).toISOString(); // 10 min
-      db.prepare('UPDATE users SET reset_otp = ?, otp_expiry = ? WHERE id = ?').run(otp, expiry, tempUserId);
-      console.log(`Generated registration OTP for ${email}: ${otp}`); // Log OTP for debugging
-      
+      const expiry = new Date(Date.now() + 10 * 60 * 1000);
+      await User.update({ reset_otp: otp, otp_expiry: expiry }, { where: { id: tempUser.id } });
+      console.log(`Generated registration OTP for ${email}`);
+
       try {
         const otpContent = buildOtpEmail({
           title: 'Complete Your Registration',
@@ -241,22 +323,21 @@ router.post('/register', async (req, res) => {
         });
       } catch (e) {
         console.error('Email sending error:', e);
-        // Clean up temporary user if email fails
-        db.prepare('DELETE FROM users WHERE id = ?').run(tempUserId);
+        await User.destroy({ where: { id: tempUser.id } });
         if (createdOrganizationId) {
-          db.prepare('DELETE FROM organizations WHERE id = ?').run(createdOrganizationId);
+          await Organization.destroy({ where: { id: createdOrganizationId } });
         }
-        
+
         if (e.message === 'Email service not configured') {
-          return res.status(500).json({ 
-            error: 'Email service not configured. Please contact administrator.',
-            details: 'Email credentials are missing from environment variables.'
+          return res.status(500).json({
+            error: 'Email service not configured. Please contact administrator.'
           });
         }
-        
-        return res.status(500).json({ 
+
+        return res.status(500).json({
           error: 'Failed to send OTP email. Please try again later.',
-          details: e.message 
+          // Never leak internal error details to the client in production.
+          ...(NODE_ENV === 'development' ? { details: e.message } : {})
         });
       }
 
@@ -264,48 +345,27 @@ router.post('/register', async (req, res) => {
         twoFactorRequired: true,
         method: 'email',
         message: 'OTP sent to email to complete registration',
-        tempUserId: tempUserId
+        tempUserId: tempUser.id
       });
     }
 
-    // If 2FA token provided, verify and complete registration
-    // Find the temporary user
-    const tempUser = db.prepare('SELECT * FROM users WHERE email = ? AND is_active = 0').get(email);
     if (!tempUser) {
-      // Log all pending users for debugging
-      const pendingUsers = db.prepare('SELECT email, reset_otp, otp_expiry FROM users WHERE is_active = 0').all();
-      console.error('[REGISTRATION] No pending user found for email:', email, 'All pending users:', pendingUsers);
+      tempUser = await User.findOne({ where: { email, is_active: false } });
+    }
+    if (!tempUser) {
+      console.error('[REGISTRATION] No pending user found for email:', email);
       return res.status(400).json({ error: 'No pending registration found for this email. Please start registration again.' });
     }
 
-    // Verify 2FA token
     let verified = false;
-    
-    console.log(`[REGISTRATION] Verifying 2FA for user ${email}:`, {
-      hasResetOtp: !!tempUser.reset_otp,
-      hasOtpExpiry: !!tempUser.otp_expiry,
-      hasTwoFactorSecret: !!tempUser.two_factor_secret,
-      providedToken: twoFactorToken,
-      expectedOtp: tempUser.reset_otp,
-      otpExpiry: tempUser.otp_expiry
-    });
-    
-    // First, check if it's an email OTP
+
+    // Prefer the emailed OTP; fall back to the TOTP authenticator code.
     if (tempUser.reset_otp && tempUser.otp_expiry) {
-      if (tempUser.reset_otp === twoFactorToken && new Date() < new Date(tempUser.otp_expiry)) {
+      if (timingSafeEqualStr(tempUser.reset_otp, twoFactorToken) && new Date() < new Date(tempUser.otp_expiry)) {
         verified = true;
-        console.log('[REGISTRATION] Registration email OTP verification successful');
-      } else {
-        console.log('[REGISTRATION] Registration email OTP verification failed', {
-          provided: twoFactorToken,
-          expected: tempUser.reset_otp,
-          expiry: tempUser.otp_expiry,
-          now: new Date().toISOString()
-        });
       }
     }
-    
-    // If email OTP didn't work, try TOTP verification
+
     if (!verified && tempUser.two_factor_secret) {
       verified = speakeasy.totp.verify({
         secret: tempUser.two_factor_secret,
@@ -313,48 +373,52 @@ router.post('/register', async (req, res) => {
         token: twoFactorToken,
         window: 1
       });
-      console.log(`[REGISTRATION] Registration TOTP verification result: ${verified}`);
     }
-    
+
     if (!verified) {
-      // Clean up pending user so they can try again
-      db.prepare('DELETE FROM users WHERE id = ?').run(tempUser.id);
+      await User.destroy({ where: { id: tempUser.id } });
       return res.status(403).json({ error: 'Invalid or expired OTP. Please try registering again.' });
     }
 
-    // 2FA verified - activate the user and complete registration
-    db.prepare('UPDATE users SET is_active = 1, reset_otp = NULL, otp_expiry = NULL, last_login = CURRENT_TIMESTAMP WHERE id = ?').run(tempUser.id);
+    await User.update(
+      { is_active: true, reset_otp: null, otp_expiry: null, last_login: new Date() },
+      { where: { id: tempUser.id } }
+    );
 
-    acceptPendingInvite(pendingInvite, tempUser.id);
+    await acceptPendingInvite(pendingInvite, tempUser.id);
 
-    // Log user contact for sales
     logUserContact(email, 'register');
 
+    const permissions = tempUser.permissions || {};
     const user = {
       id: tempUser.id,
       email,
       role: tempUser.role,
-      organization_id: tempUser.organization_id
+      organization_id: tempUser.organization_id,
+      permissions,
+      name: tempUser.name
     };
 
     const token = jwt.sign(
-      { 
-        id: user.id, 
-        email: user.email, 
+      {
+        id: user.id,
+        email: user.email,
         role: user.role,
-        organization_id: user.organization_id
+        organization_id: user.organization_id,
+        permissions,
+        name: user.name
       },
       getJwtSecret(),
       { expiresIn: '24h' }
     );
 
-    res.json({ 
-      token, 
-      user, 
-      twoFA: { 
-        qr, 
-        secret: secret ? secret.base32 : null, 
-        method: twoFactorMethod 
+    res.json({
+      token,
+      user,
+      twoFA: {
+        qr,
+        secret: secret ? secret.base32 : null,
+        method: twoFactorMethod
       },
       message: 'Registration completed successfully!'
     });
@@ -368,33 +432,36 @@ router.post('/register', async (req, res) => {
 router.post('/login', async (req, res) => {
   try {
     const { email, password, twoFactorToken } = req.body;
-    console.log('Login attempt:', email);
     const ip = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
+
     if (!email || !password) {
-      db.prepare('INSERT INTO login_attempts (email, success, ip_address) VALUES (?, ?, ?)').run(email, 0, ip);
+      await LoginAttempt.create({ email, success: false, ip_address: ip });
       return res.status(400).json({ error: 'Email and password are required' });
     }
-    const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
+
+    const user = await User.findOne({ where: { email } });
     if (!user) {
-      db.prepare('INSERT INTO login_attempts (email, success, ip_address) VALUES (?, ?, ?)').run(email, 0, ip);
+      await LoginAttempt.create({ email, success: false, ip_address: ip });
       return res.status(401).json({ error: 'Invalid credentials' });
     }
     if (!user.is_active) {
-      db.prepare('INSERT INTO login_attempts (email, success, ip_address) VALUES (?, ?, ?)').run(email, 0, ip);
+      await LoginAttempt.create({ email, success: false, ip_address: ip });
       return res.status(401).json({ error: 'Account is deactivated' });
     }
-    const validPassword = await bcrypt.compare(password, user.password_hash);
+
+    const validPassword = await bcrypt.compare(password, user.password_hash || '');
     if (!validPassword) {
-      db.prepare('INSERT INTO login_attempts (email, success, ip_address) VALUES (?, ?, ?)').run(email, 0, ip);
+      await LoginAttempt.create({ email, success: false, ip_address: ip });
       return res.status(401).json({ error: 'Invalid credentials' });
     }
-    // Always require 2FA
+
     if (!twoFactorToken) {
-      // Generate OTP and send email
       const otp = (Math.floor(100000 + Math.random() * 900000)).toString();
-      const expiry = new Date(Date.now() + 10 * 60 * 1000).toISOString(); // 10 min
-      db.prepare('UPDATE users SET reset_otp = ?, otp_expiry = ? WHERE id = ?').run(otp, expiry, user.id);
-      console.log(`Generated OTP for ${email}: ${otp}`); // Log OTP for debugging
+      const expiry = new Date(Date.now() + 10 * 60 * 1000);
+      user.reset_otp = otp;
+      user.otp_expiry = expiry;
+      await user.save();
+      console.log(`Generated login OTP for ${email}`);
       try {
         const otpContent = buildOtpEmail({
           title: 'Your Login OTP',
@@ -418,60 +485,52 @@ router.post('/login', async (req, res) => {
         message: 'OTP sent to email'
       });
     }
-    // Verify 2FA token - try email OTP first, then TOTP
+
     let verified = false;
-    
-    console.log(`Verifying 2FA for user ${email}:`, {
-      hasResetOtp: !!user.reset_otp,
-      hasOtpExpiry: !!user.otp_expiry,
-      hasTwoFactorSecret: !!user.two_factor_secret,
-      providedToken: twoFactorToken
-    });
-    
-    // First, check if it's an email OTP
+
+    // Prefer the emailed OTP; fall back to the TOTP authenticator code.
     if (user.reset_otp && user.otp_expiry) {
-      console.log(`Checking email OTP: expected=${user.reset_otp}, provided=${twoFactorToken}, expiry=${user.otp_expiry}`);
-      if (user.reset_otp === twoFactorToken && new Date() < new Date(user.otp_expiry)) {
+      if (timingSafeEqualStr(user.reset_otp, twoFactorToken) && new Date() < new Date(user.otp_expiry)) {
         verified = true;
-        console.log('Email OTP verification successful');
-        // Clear the used OTP
-        db.prepare('UPDATE users SET reset_otp = NULL, otp_expiry = NULL WHERE id = ?').run(user.id);
-      } else {
-        console.log('Email OTP verification failed');
+        user.reset_otp = null;
+        user.otp_expiry = null;
       }
     }
-    
-    // If email OTP didn't work, try TOTP verification
+
     if (!verified && user.two_factor_secret) {
-      console.log(`Attempting TOTP verification with secret: ${user.two_factor_secret.substring(0, 10)}...`);
       verified = speakeasy.totp.verify({
         secret: user.two_factor_secret,
         encoding: 'base32',
         token: twoFactorToken,
         window: 1
       });
-      console.log(`TOTP verification result: ${verified}`);
     }
-    
+
     if (!verified) {
-      console.log(`2FA verification failed for user ${email}`);
-      db.prepare('INSERT INTO login_attempts (email, success, ip_address) VALUES (?, ?, ?)').run(email, 0, ip);
+      await LoginAttempt.create({ email, success: false, ip_address: ip });
       return res.status(403).json({ error: 'Invalid 2FA code' });
     }
+
+    user.last_login = new Date();
+    await user.save();
+
+    const permissions = user.permissions || {};
     const token = jwt.sign(
-      { 
-        id: user.id, 
-        email: user.email, 
-        role: user.role, 
-        organization_id: user.organization_id 
+      {
+        id: user.id,
+        email: user.email,
+        role: user.role,
+        organization_id: user.organization_id,
+        permissions,
+        name: user.name
       },
       getJwtSecret(),
       { expiresIn: '24h' }
     );
-    db.prepare('UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = ?').run(user.id);
-    db.prepare('INSERT INTO login_attempts (email, success, ip_address) VALUES (?, ?, ?)').run(email, 1, ip);
-    // Log user contact for sales
+
+    await LoginAttempt.create({ email, success: true, ip_address: ip });
     logUserContact(email, 'login');
+
     res.json({
       token,
       user: {
@@ -480,13 +539,13 @@ router.post('/login', async (req, res) => {
         role: user.role,
         organization_id: user.organization_id,
         name: user.name,
-        permissions: JSON.parse(user.permissions || '{}')
+        permissions
       }
     });
   } catch (error) {
     const { email } = req.body;
     const ip = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
-    db.prepare('INSERT INTO login_attempts (email, success, ip_address) VALUES (?, ?, ?)').run(email, 0, ip);
+    await LoginAttempt.create({ email, success: false, ip_address: ip });
     console.error('Login error:', error);
     res.status(500).json({ error: NODE_ENV === 'development' ? error.message : 'Login failed' });
   }
@@ -555,37 +614,23 @@ router.post('/github', async (req, res) => {
       return res.status(400).json({ error: 'GitHub email not available' });
     }
 
-    let user = db.prepare('SELECT * FROM users WHERE github_id = ?').get(githubId);
-    const secret = speakeasy.generateSecret({ name: `Aikya (${email})` });
+    const user = await upsertGitHubUser({
+      githubId,
+      email,
+      name,
+      accessToken: access_token
+    });
 
-    if (!user) {
-      const existingByEmail = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
-      if (existingByEmail) {
-        db.prepare('UPDATE users SET github_id = ?, github_token = ? WHERE id = ?')
-          .run(githubId, access_token, existingByEmail.id);
-        user = db.prepare('SELECT * FROM users WHERE id = ?').get(existingByEmail.id);
-      } else {
-        const pendingInvite = db.prepare(`
-          SELECT * FROM organization_invites
-          WHERE email = ? AND status = 'pending' AND (expires_at IS NULL OR datetime(expires_at) > datetime('now'))
-        `).get(email);
-        const resolvedRole = pendingInvite ? pendingInvite.role : 'manager';
-        const resolvedOrganizationId = pendingInvite
-          ? pendingInvite.organization_id
-          : createOrganizationForEmail(email);
-
-        const result = db.prepare(
-          'INSERT INTO users (email, github_id, role, organization_id, is_active, two_factor_secret, github_token, name) VALUES (?, ?, ?, ?, 1, ?, ?, ?)'
-        ).run(email, githubId, resolvedRole, resolvedOrganizationId, secret.base32, access_token, name);
-        user = db.prepare('SELECT * FROM users WHERE id = ?').get(result.lastInsertRowid);
-        acceptPendingInvite(pendingInvite, user.id);
-      }
-    } else {
-      db.prepare('UPDATE users SET github_token = ? WHERE id = ?').run(access_token, user.id);
-    }
-
+    const permissions = user.permissions || {};
     const token = jwt.sign(
-      { id: user.id, email: user.email, role: user.role, organization_id: user.organization_id },
+      {
+        id: user.id,
+        email: user.email,
+        role: user.role,
+        organization_id: user.organization_id,
+        permissions,
+        name: user.name
+      },
       getJwtSecret(),
       { expiresIn: '24h' }
     );
@@ -597,7 +642,8 @@ router.post('/github', async (req, res) => {
         email: user.email,
         role: user.role,
         organization_id: user.organization_id,
-        name: user.name
+        name: user.name,
+        permissions
       }
     });
   } catch (error) {
@@ -664,44 +710,38 @@ router.get('/github/callback', async (req, res) => {
       return res.status(400).json({ error: 'GitHub email not available' });
     }
 
-    let user = db.prepare('SELECT * FROM users WHERE github_id = ?').get(githubId);
-    const secret = speakeasy.generateSecret({ name: `Aikya (${email})` });
+    const user = await upsertGitHubUser({
+      githubId,
+      email,
+      name,
+      accessToken: access_token
+    });
 
-    if (!user) {
-      const existingByEmail = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
-      if (existingByEmail) {
-        db.prepare('UPDATE users SET github_id = ?, github_token = ? WHERE id = ?')
-          .run(githubId, access_token, existingByEmail.id);
-        user = db.prepare('SELECT * FROM users WHERE id = ?').get(existingByEmail.id);
-      } else {
-        const pendingInvite = db.prepare(`
-          SELECT * FROM organization_invites
-          WHERE email = ? AND status = 'pending' AND (expires_at IS NULL OR datetime(expires_at) > datetime('now'))
-        `).get(email);
-        const resolvedRole = pendingInvite ? pendingInvite.role : 'manager';
-        const resolvedOrganizationId = pendingInvite
-          ? pendingInvite.organization_id
-          : createOrganizationForEmail(email);
-
-        const result = db.prepare(
-          'INSERT INTO users (email, github_id, role, organization_id, is_active, two_factor_secret, github_token, name) VALUES (?, ?, ?, ?, 1, ?, ?, ?)'
-        ).run(email, githubId, resolvedRole, resolvedOrganizationId, secret.base32, access_token, name);
-        user = db.prepare('SELECT * FROM users WHERE id = ?').get(result.lastInsertRowid);
-        acceptPendingInvite(pendingInvite, user.id);
-      }
-    } else {
-      db.prepare('UPDATE users SET github_token = ? WHERE id = ?').run(access_token, user.id);
-    }
-
+    const permissions = user.permissions || {};
     const token = jwt.sign(
-      { id: user.id, email: user.email, role: user.role, organization_id: user.organization_id },
+      {
+        id: user.id,
+        email: user.email,
+        role: user.role,
+        organization_id: user.organization_id,
+        permissions,
+        name: user.name
+      },
       getJwtSecret(),
       { expiresIn: '24h' }
     );
 
-    db.prepare('UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = ?').run(user.id);
+    await User.update({ last_login: new Date() }, { where: { id: user.id } });
 
-    res.json({ token, user: { id: user.id, email: user.email, role: user.role } });
+    res.json({
+      token,
+      user: {
+        id: user.id,
+        email: user.email,
+        role: user.role,
+        permissions
+      }
+    });
   } catch (error) {
     console.error('GitHub OAuth error:', error.response?.data || error);
     res.status(500).json({ error: 'Failed to authenticate with GitHub' });
@@ -713,10 +753,8 @@ router.post('/github/disconnect', authenticateToken, async (req, res) => {
   try {
     const userId = req.user.id;
 
-    // Remove GitHub token
-    db.prepare('UPDATE users SET github_token = NULL WHERE id = ?').run(userId);
+    await User.update({ github_token: null }, { where: { id: userId } });
 
-    // Log audit action
     await logAuditAction(userId, 'GITHUB_DISCONNECT', 'user', userId);
 
     res.json({ message: 'GitHub account disconnected successfully' });
@@ -729,29 +767,25 @@ router.post('/github/disconnect', authenticateToken, async (req, res) => {
 // Request password reset (send OTP)
 router.post('/request-password-reset', async (req, res) => {
   try {
-    console.log('Password reset request received for:', req.body.email);
-    
     const { email } = req.body;
     if (!email) {
-      console.log('No email provided in request');
       return res.status(400).json({ error: 'Email required' });
     }
-    
-    const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
+
+    const user = await User.findOne({ where: { email } });
     if (!user) {
-      console.log('User not found for email:', email);
-      return res.status(404).json({ error: 'User not found' });
+      // Do not reveal whether an account exists (prevents email enumeration).
+      // Respond with the same generic message as the success path.
+      return res.json({ message: 'If an account exists for this email, an OTP has been sent.' });
     }
-    
-    console.log('User found, generating OTP for:', email);
+
     const otp = (Math.floor(100000 + Math.random() * 900000)).toString();
-    const expiry = new Date(Date.now() + 10 * 60 * 1000).toISOString(); // 10 min
-    
-    // Update user with OTP
-    db.prepare('UPDATE users SET reset_otp = ?, otp_expiry = ? WHERE id = ?').run(otp, expiry, user.id);
-    console.log('OTP generated and stored for user:', email, 'OTP:', otp);
-    
-    // Send OTP email
+    const expiry = new Date(Date.now() + 10 * 60 * 1000);
+
+    user.reset_otp = otp;
+    user.otp_expiry = expiry;
+    await user.save();
+
     try {
       const otpContent = buildOtpEmail({
         title: 'Reset Your Password',
@@ -765,60 +799,55 @@ router.post('/request-password-reset', async (req, res) => {
         text: otpContent.text,
         html: otpContent.html
       });
-      
-      console.log('Email sending result:', emailResult);
-      
+
       if (emailResult.devMode) {
-        // In development mode, return success with OTP in response
-        res.json({ 
+        res.json({
           message: 'OTP sent to email (dev mode)',
           devOtp: otp,
           devMode: true
         });
       } else {
-        res.json({ message: 'OTP sent to email' });
+        res.json({ message: 'If an account exists for this email, an OTP has been sent.' });
       }
     } catch (emailError) {
       console.error('Email sending error:', emailError);
-      
+
       if (emailError.message === 'Email service not configured') {
-        // In production, this should be an error, but in dev we can still proceed
         if (NODE_ENV === 'development') {
-          return res.json({ 
+          return res.json({
             message: 'OTP generated (email not configured)',
             devOtp: otp,
             devMode: true,
             warning: 'Email service not configured'
           });
         } else {
-          return res.status(500).json({ 
-            error: 'Email service not configured. Please contact administrator.',
-            details: 'Email credentials are missing from environment variables.'
+          return res.status(500).json({
+            error: 'Email service not configured. Please contact administrator.'
           });
         }
       }
-      
-      res.status(500).json({ 
+
+      res.status(500).json({
         error: 'Failed to send email. Please try again later.',
-        details: emailError.message 
+        ...(NODE_ENV === 'development' ? { details: emailError.message } : {})
       });
     }
   } catch (error) {
     console.error('Unexpected error in request-password-reset:', error);
-    res.status(500).json({ 
+    res.status(500).json({
       error: 'An unexpected error occurred. Please try again.',
-      details: error.message 
+      ...(NODE_ENV === 'development' ? { details: error.message } : {})
     });
   }
 });
 
 // Verify OTP
-router.post('/verify-otp', (req, res) => {
+router.post('/verify-otp', async (req, res) => {
   const { email, otp } = req.body;
   if (!email || !otp) return res.status(400).json({ error: 'Email and OTP required' });
-  const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
+  const user = await User.findOne({ where: { email } });
   if (!user || !user.reset_otp || !user.otp_expiry) return res.status(400).json({ error: 'No OTP set' });
-  if (user.reset_otp !== otp) return res.status(400).json({ error: 'Invalid OTP' });
+  if (!timingSafeEqualStr(user.reset_otp, otp)) return res.status(400).json({ error: 'Invalid OTP' });
   if (new Date() > new Date(user.otp_expiry)) return res.status(400).json({ error: 'OTP expired' });
   res.json({ message: 'OTP verified' });
 });
@@ -827,12 +856,16 @@ router.post('/verify-otp', (req, res) => {
 router.post('/reset-password', async (req, res) => {
   const { email, otp, newPassword } = req.body;
   if (!email || !otp || !newPassword) return res.status(400).json({ error: 'All fields required' });
-  const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
+  if (newPassword.length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters long' });
+  const user = await User.findOne({ where: { email } });
   if (!user || !user.reset_otp || !user.otp_expiry) return res.status(400).json({ error: 'No OTP set' });
-  if (user.reset_otp !== otp) return res.status(400).json({ error: 'Invalid OTP' });
+  if (!timingSafeEqualStr(user.reset_otp, otp)) return res.status(400).json({ error: 'Invalid OTP' });
   if (new Date() > new Date(user.otp_expiry)) return res.status(400).json({ error: 'OTP expired' });
   const passwordHash = await bcrypt.hash(newPassword, 12);
-  db.prepare('UPDATE users SET password_hash = ?, reset_otp = NULL, otp_expiry = NULL WHERE id = ?').run(passwordHash, user.id);
+  user.password_hash = passwordHash;
+  user.reset_otp = null;
+  user.otp_expiry = null;
+  await user.save();
   res.json({ message: 'Password reset successful' });
 });
 
@@ -840,20 +873,20 @@ router.post('/reset-password', async (req, res) => {
 router.post('/enable-2fa', async (req, res) => {
   const { email } = req.body;
   if (!email) return res.status(400).json({ error: 'Email required' });
-  const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
+  const user = await User.findOne({ where: { email } });
   if (!user) return res.status(404).json({ error: 'User not found' });
-  const secret = speakeasy.generateSecret({ name: `DevOpsAI (${email})` });
-  db.prepare('UPDATE users SET two_factor_secret = ? WHERE id = ?').run(secret.base32, user.id);
-  const otpauth = secret.otpauth_url;
-  const qr = await qrcode.toDataURL(otpauth);
+  const secret = speakeasy.generateSecret({ name: `Aikya (${email})` });
+  user.two_factor_secret = secret.base32;
+  await user.save();
+  const qr = await qrcode.toDataURL(secret.otpauth_url);
   res.json({ qr, secret: secret.base32 });
 });
 
 // 2FA Verify (during setup or login)
-router.post('/verify-2fa', (req, res) => {
+router.post('/verify-2fa', async (req, res) => {
   const { email, token } = req.body;
   if (!email || !token) return res.status(400).json({ error: 'Email and token required' });
-  const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
+  const user = await User.findOne({ where: { email } });
   if (!user || !user.two_factor_secret) return res.status(400).json({ error: '2FA not set up' });
   const verified = speakeasy.totp.verify({
     secret: user.two_factor_secret,
@@ -862,9 +895,9 @@ router.post('/verify-2fa', (req, res) => {
     window: 1
   });
   if (!verified) return res.status(400).json({ error: 'Invalid 2FA code' });
-  // If verifying for setup, enable 2FA
   if (!user.two_factor_enabled) {
-    db.prepare('UPDATE users SET two_factor_enabled = 1 WHERE id = ?').run(user.id);
+    user.two_factor_enabled = true;
+    await user.save();
   }
   res.json({ message: '2FA verified' });
 });

@@ -1,7 +1,8 @@
 import express from 'express';
 import bcrypt from 'bcryptjs';
 import speakeasy from 'speakeasy';
-import { db } from '../database/init.js';
+import { Op } from 'sequelize';
+import { OrganizationInvite, Organization, User, Team, TeamMember } from '../models/index.js';
 
 const router = express.Router();
 
@@ -10,24 +11,21 @@ const isInviteExpired = (invite) => {
   return new Date(invite.expires_at) < new Date();
 };
 
-router.get('/:token', (req, res) => {
+router.get('/:token', async (req, res) => {
   try {
     const { token } = req.params;
-    const invite = db.prepare(`
-      SELECT i.*, o.name as organization_name
-      FROM organization_invites i
-      JOIN organizations o ON o.id = i.organization_id
-      WHERE i.token = ?
-    `).get(token);
+    const invite = await OrganizationInvite.findOne({ where: { token }, raw: true });
 
     if (!invite || invite.status !== 'pending' || isInviteExpired(invite)) {
       return res.status(404).json({ error: 'Invite not found or expired' });
     }
 
+    const organization = await Organization.findByPk(invite.organization_id, { raw: true });
+
     res.json({
       email: invite.email,
       role: invite.role,
-      organization_name: invite.organization_name
+      organization_name: organization?.name || 'Aikya workspace'
     });
   } catch (error) {
     console.error('Invite fetch error:', error);
@@ -47,19 +45,13 @@ router.post('/accept', async (req, res) => {
       return res.status(400).json({ error: 'Password must be at least 8 characters long.' });
     }
 
-    const invite = db.prepare(`
-      SELECT i.*, o.name as organization_name
-      FROM organization_invites i
-      JOIN organizations o ON o.id = i.organization_id
-      WHERE i.token = ?
-    `).get(token);
-
+    const invite = await OrganizationInvite.findOne({ where: { token } });
     if (!invite || invite.status !== 'pending' || isInviteExpired(invite)) {
       return res.status(404).json({ error: 'Invite not found or expired' });
     }
 
-    const existingUser = db.prepare('SELECT * FROM users WHERE email = ?').get(invite.email);
-    if (existingUser && existingUser.is_active && existingUser.organization_id !== invite.organization_id) {
+    const existingUser = await User.findOne({ where: { email: invite.email } });
+    if (existingUser && existingUser.is_active && Number(existingUser.organization_id) !== Number(invite.organization_id)) {
       return res.status(400).json({ error: 'User already belongs to another organization.' });
     }
 
@@ -70,44 +62,53 @@ router.post('/accept', async (req, res) => {
 
     let userId = existingUser?.id;
     if (existingUser) {
-      db.prepare(`
-        UPDATE users
-        SET password_hash = ?, role = ?, organization_id = ?, is_active = 1, name = ?, two_factor_secret = ?
-        WHERE id = ?
-      `).run(
-        passwordHash,
-        invite.role,
-        invite.organization_id,
-        name || existingUser.name,
-        secret,
-        existingUser.id
+      await User.update(
+        {
+          password_hash: passwordHash,
+          role: invite.role,
+          organization_id: invite.organization_id,
+          is_active: true,
+          name: name || existingUser.name,
+          two_factor_secret: secret
+        },
+        { where: { id: existingUser.id } }
       );
+      userId = existingUser.id;
     } else {
-      const result = db.prepare(`
-        INSERT INTO users (email, password_hash, role, organization_id, is_active, two_factor_secret, name)
-        VALUES (?, ?, ?, ?, 1, ?, ?)
-      `).run(invite.email, passwordHash, invite.role, invite.organization_id, secret, name || null);
-      userId = result.lastInsertRowid;
-    }
-
-    const teamIds = JSON.parse(invite.team_ids || '[]');
-    if (Array.isArray(teamIds) && teamIds.length > 0) {
-      const teams = db.prepare(`
-        SELECT id FROM teams WHERE organization_id = ? AND id IN (${teamIds.map(() => '?').join(',')})
-      `).all(invite.organization_id, ...teamIds);
-      teams.forEach((team) => {
-        db.prepare(`
-          INSERT OR IGNORE INTO team_members (team_id, user_id, role)
-          VALUES (?, ?, 'member')
-        `).run(team.id, userId);
+      const user = await User.create({
+        email: invite.email,
+        password_hash: passwordHash,
+        role: invite.role,
+        organization_id: invite.organization_id,
+        is_active: true,
+        two_factor_secret: secret,
+        name: name || null
       });
+      userId = user.id;
     }
 
-    db.prepare(`
-      UPDATE organization_invites
-      SET status = 'accepted', accepted_at = CURRENT_TIMESTAMP
-      WHERE id = ?
-    `).run(invite.id);
+    const teamIds = Array.isArray(invite.team_ids) ? invite.team_ids : [];
+    if (teamIds.length > 0) {
+      const teams = await Team.findAll({
+        where: {
+          organization_id: invite.organization_id,
+          id: { [Op.in]: teamIds }
+        },
+        attributes: ['id'],
+        raw: true
+      });
+      for (const team of teams) {
+        await TeamMember.findOrCreate({
+          where: { team_id: team.id, user_id: userId },
+          defaults: { organization_id: invite.organization_id, role: 'member' }
+        });
+      }
+    }
+
+    await OrganizationInvite.update(
+      { status: 'accepted', accepted_at: new Date() },
+      { where: { id: invite.id } }
+    );
 
     res.json({ message: 'Invite accepted. You can now sign in.' });
   } catch (error) {

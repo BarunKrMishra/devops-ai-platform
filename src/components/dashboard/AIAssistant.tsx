@@ -1,5 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
+import axios from 'axios';
 import { Send, Bot, User, Zap, Clock, CheckCircle } from 'lucide-react';
+import { useAuth } from '../../contexts/AuthContext';
+
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
 interface Message {
   id: string;
@@ -10,6 +14,7 @@ interface Message {
 }
 
 const AIAssistant: React.FC = () => {
+  const { token } = useAuth();
   const [messages, setMessages] = useState<Message[]>([
     {
       id: '1',
@@ -31,12 +36,13 @@ const AIAssistant: React.FC = () => {
   }, [messages]);
 
   const handleSendMessage = async () => {
-    if (!inputValue.trim()) return;
+    if (!inputValue.trim() || isTyping) return;
 
+    const command = inputValue.trim();
     const userMessage: Message = {
       id: Date.now().toString(),
       type: 'user',
-      content: inputValue,
+      content: command,
       timestamp: new Date(),
     };
 
@@ -44,32 +50,32 @@ const AIAssistant: React.FC = () => {
     setInputValue('');
     setIsTyping(true);
 
-    // Simulate AI response
-    setTimeout(() => {
+    try {
+      const { data } = await axios.post(
+        `${API_URL}/api/ai/command`,
+        { command },
+        token ? { headers: { Authorization: `Bearer ${token}` } } : undefined
+      );
       const aiResponse: Message = {
         id: (Date.now() + 1).toString(),
         type: 'ai',
-        content: getAIResponse(inputValue),
+        content: data?.message || data?.response || 'I processed your request.',
         timestamp: new Date(),
-        status: 'completed'
+        status: data?.success === false ? 'error' : 'completed'
       };
-      
       setMessages(prev => [...prev, aiResponse]);
+    } catch (err) {
+      const aiResponse: Message = {
+        id: (Date.now() + 1).toString(),
+        type: 'ai',
+        content:
+          "I couldn't reach the AI service right now. Please make sure an AI provider is configured, then try again.",
+        timestamp: new Date(),
+        status: 'error'
+      };
+      setMessages(prev => [...prev, aiResponse]);
+    } finally {
       setIsTyping(false);
-    }, 1500);
-  };
-
-  const getAIResponse = (input: string): string => {
-    const lowerInput = input.toLowerCase();
-    
-    if (lowerInput.includes('deploy')) {
-      return "I'll help you deploy your application. I can see you have a React app ready. Would you like me to:\n\n- Deploy to AWS with auto-scaling\n- Set up CI/CD pipeline with GitHub Actions\n- Configure load balancing and SSL\n\nWhich cloud provider would you prefer?";
-    } else if (lowerInput.includes('scale')) {
-      return "I can help optimize your scaling strategy. Based on your current traffic patterns, I recommend:\n\n- Enable auto-scaling for your EC2 instances\n- Set up CloudWatch alarms for CPU > 70%\n- Configure scale-down during low traffic hours\n\nThis could save you approximately 30% on compute costs.";
-    } else if (lowerInput.includes('cost')) {
-      return "I've analyzed your infrastructure costs. Here are my recommendations:\n\n- Switch to Reserved Instances (save $234/month)\n- Right-size your databases (save $89/month)\n- Enable S3 lifecycle policies (save $45/month)\n\nTotal potential savings: $368/month. Should I implement these optimizations?";
-    } else {
-      return "I understand you're looking for help with your DevOps workflow. I can assist with:\n\n- Application deployment and scaling\n- Infrastructure provisioning\n- Cost optimization\n- CI/CD pipeline setup\n- Monitoring and alerting\n\nCould you tell me more about what you'd like to achieve?";
     }
   };
 

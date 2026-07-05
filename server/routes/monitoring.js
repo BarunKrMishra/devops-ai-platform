@@ -1,10 +1,13 @@
 import express from 'express';
 import axios from 'axios';
-import { db } from '../database/init.js';
+import { InfrastructureResource, Project } from '../models/index.js';
 import { io } from '../index.js';
 import { getIntegrationRecord } from '../utils/integrations.js';
+import { requireOpsAccess } from '../middleware/auth.js';
+import { requireOpsEnabled } from '../middleware/ops.js';
 
 const router = express.Router();
+router.use(requireOpsAccess('aidevops'), requireOpsEnabled('aidevops'));
 
 // Simulate real-time metrics with realistic patterns
 function generateRealisticMetrics() {
@@ -330,9 +333,9 @@ router.get('/metrics/:projectId', async (req, res) => {
   try {
     const organizationId = req.user.organization_id;
 
-    const datadogIntegration = getIntegrationRecord(organizationId, 'datadog');
-    const prometheusIntegration = getIntegrationRecord(organizationId, 'prometheus');
-    const grafanaIntegration = getIntegrationRecord(organizationId, 'grafana');
+    const datadogIntegration = await getIntegrationRecord(organizationId, 'datadog');
+    const prometheusIntegration = await getIntegrationRecord(organizationId, 'prometheus');
+    const grafanaIntegration = await getIntegrationRecord(organizationId, 'grafana');
 
     let metrics = null;
 
@@ -387,10 +390,10 @@ router.get('/alerts', async (req, res) => {
   try {
     const organizationId = req.user.organization_id;
 
-    const datadogIntegration = getIntegrationRecord(organizationId, 'datadog');
-    const prometheusIntegration = getIntegrationRecord(organizationId, 'prometheus');
-    const grafanaIntegration = getIntegrationRecord(organizationId, 'grafana');
-    const pagerdutyIntegration = getIntegrationRecord(organizationId, 'pagerduty');
+    const datadogIntegration = await getIntegrationRecord(organizationId, 'datadog');
+    const prometheusIntegration = await getIntegrationRecord(organizationId, 'prometheus');
+    const grafanaIntegration = await getIntegrationRecord(organizationId, 'grafana');
+    const pagerdutyIntegration = await getIntegrationRecord(organizationId, 'pagerduty');
 
     const alerts = [];
 
@@ -500,12 +503,16 @@ router.post('/auto-heal/:resourceId', async (req, res) => {
     const userId = req.user.id;
 
     // Get resource
-    const resource = db.prepare(
-      `SELECT ir.*, p.user_id FROM infrastructure_resources ir 
-       JOIN projects p ON ir.project_id = p.id WHERE ir.id = ?`
-    ).get(resourceId);
+    const resource = await InfrastructureResource.findByPk(resourceId, { raw: true });
+    if (!resource) {
+      return res.status(404).json({ error: 'Resource not found' });
+    }
 
-    if (!resource || resource.user_id !== userId) {
+    const project = resource.project_id
+      ? await Project.findOne({ where: { id: resource.project_id, user_id: userId }, raw: true })
+      : null;
+
+    if (!project) {
       return res.status(404).json({ error: 'Resource not found' });
     }
 
@@ -552,21 +559,19 @@ router.get('/health/:projectId', async (req, res) => {
     const userId = req.user.id;
 
     // Verify project ownership
-    const project = db.prepare('SELECT * FROM projects WHERE id = ? AND user_id = ?').get(projectId, userId);
+    const project = await Project.findOne({ where: { id: projectId, user_id: userId }, raw: true });
     if (!project) {
       return res.status(404).json({ error: 'Project not found' });
     }
 
     // Get project resources
-    const resources = db.prepare(
-      'SELECT * FROM infrastructure_resources WHERE project_id = ?'
-    ).all(projectId);
+    const resources = await InfrastructureResource.findAll({ where: { project_id: projectId }, raw: true });
 
     // Generate realistic health status
     const healthStatus = {
       overall: Math.random() > 0.1 ? 'healthy' : 'warning',
       services: resources.map(resource => ({
-        id: resource.id,
+        id: String(resource._id),
         type: resource.resource_type,
         status: Math.random() > 0.15 ? 'healthy' : (Math.random() > 0.5 ? 'warning' : 'critical'),
         uptime: Math.random() * 100,

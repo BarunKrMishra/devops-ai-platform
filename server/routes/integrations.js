@@ -1,8 +1,11 @@
 import express from 'express';
 import axios from 'axios';
 import jwt from 'jsonwebtoken';
-import { db } from '../database/init.js';
+import { fn, col } from 'sequelize';
+import { Integration, IntegrationSecret, IntegrationEvent, BusinessEmail } from '../models/index.js';
 import { encryptPayload } from '../utils/encryption.js';
+import { getIntegrationRecord } from '../utils/integrations.js';
+import { syncIntegration, supportedProviders } from '../services/integrations/syncManager.js';
 
 const router = express.Router();
 const oauthCallbackRouter = express.Router();
@@ -18,11 +21,32 @@ const SUPPORTED_PROVIDERS = [
   'prometheus',
   'slack',
   'pagerduty',
-  'jenkins'
+  'jenkins',
+  'gmail',
+  'outlook',
+  'hubspot',
+  'salesforce',
+  'zoho',
+  'intercom',
+  'zendesk',
+  'freshdesk',
+  'twilio',
+  'stripe',
+  'google_sheets',
+  'n8n',
+  'make',
+  'whatsapp',
+  'quickbooks',
+  'shopify',
+  'jira',
+  'clickup',
+  'hubspot_marketing',
+  'razorpay'
 ];
 
 const JWT_SECRET = process.env.JWT_SECRET;
 const FRONTEND_BASE_URL = process.env.APP_BASE_URL || 'http://localhost:5173';
+const AUTO_SYNC_ON_CONNECT = process.env.INTEGRATION_SYNC_AUTO_ON_CONNECT !== 'false';
 
 const getJwtSecret = () => {
   if (!JWT_SECRET) {
@@ -76,48 +100,38 @@ const buildStateToken = (payload) =>
 const verifyStateToken = (token) =>
   jwt.verify(token, getJwtSecret());
 
-const upsertIntegration = ({ orgId, userId, provider, displayName, connectionMethod, metadata = {} }) => {
-  const existing = db.prepare(
-    'SELECT id FROM integrations WHERE organization_id = ? AND type = ?'
-  ).get(orgId, provider);
-
-  const safeConfig = JSON.stringify({
+const upsertIntegration = async ({ orgId, userId, provider, displayName, connectionMethod, metadata = {} }) => {
+  const safeConfig = {
     connection_method: connectionMethod,
     metadata
-  });
+  };
 
+  const existing = await Integration.findOne({ where: { organization_id: orgId, type: provider } });
   if (existing) {
-    db.prepare(
-      `UPDATE integrations
-       SET name = ?,
-           configuration = ?,
-           is_active = 1,
-           updated_at = CURRENT_TIMESTAMP
-       WHERE id = ?`
-    ).run(
-      displayName || provider.toUpperCase(),
-      safeConfig,
-      existing.id
+    await Integration.update(
+      {
+        name: displayName || provider.toUpperCase(),
+        configuration: safeConfig,
+        is_active: true
+      },
+      { where: { id: existing.id } }
     );
     return existing.id;
   }
 
-  const result = db.prepare(
-    `INSERT INTO integrations
-     (organization_id, type, name, configuration, is_active, created_by)
-     VALUES (?, ?, ?, ?, 1, ?)`
-  ).run(
-    orgId,
-    provider,
-    displayName || provider.toUpperCase(),
-    safeConfig,
-    userId
-  );
+  const integration = await Integration.create({
+    organization_id: orgId,
+    type: provider,
+    name: displayName || provider.toUpperCase(),
+    configuration: safeConfig,
+    is_active: true,
+    created_by: userId
+  });
 
-  return result.lastInsertRowid;
+  return integration.id;
 };
 
-const storeCredentials = ({ orgId, integrationId, credentials }) => {
+const storeCredentials = async ({ orgId, integrationId, credentials }) => {
   let encrypted;
   try {
     encrypted = encryptPayload(credentials);
@@ -126,63 +140,57 @@ const storeCredentials = ({ orgId, integrationId, credentials }) => {
     throw new Error('Failed to secure credentials. Check master key.');
   }
 
-  const existingSecret = db.prepare(
-    'SELECT id FROM integration_secrets WHERE integration_id = ?'
-  ).get(integrationId);
+  const existingSecret = await IntegrationSecret.findOne({ where: { integration_id: integrationId } });
 
   if (existingSecret) {
-    db.prepare(
-      `UPDATE integration_secrets
-       SET encrypted_payload = ?, updated_at = CURRENT_TIMESTAMP
-       WHERE integration_id = ?`
-    ).run(JSON.stringify(encrypted), integrationId);
+    await IntegrationSecret.update(
+      { encrypted_payload: encrypted },
+      { where: { integration_id: integrationId } }
+    );
   } else {
-    db.prepare(
-      `INSERT INTO integration_secrets
-       (organization_id, integration_id, encrypted_payload)
-       VALUES (?, ?, ?)`
-    ).run(orgId, integrationId, JSON.stringify(encrypted));
+    await IntegrationSecret.create({
+      organization_id: orgId,
+      integration_id: integrationId,
+      encrypted_payload: encrypted
+    });
   }
 };
 
-const parseConfig = (value) => {
-  if (!value) {
-    return {};
-  }
-  try {
-    return JSON.parse(value);
-  } catch (error) {
-    return {};
-  }
-};
-
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
   const orgId = req.user.organization_id;
 
-  const rows = db.prepare(
-    `SELECT i.*, s.id AS secret_id
-     FROM integrations i
-     LEFT JOIN integration_secrets s ON s.integration_id = i.id
-     WHERE i.organization_id = ?
-     ORDER BY i.created_at DESC`
-  ).all(orgId);
+  const integrations = await Integration.findAll({
+    where: { organization_id: orgId },
+    order: [['created_at', 'DESC']],
+    raw: true
+  });
 
-  const integrations = rows.map((row) => ({
-    id: row.id,
-    type: row.type,
-    name: row.name,
-    is_active: Boolean(row.is_active),
-    last_sync: row.last_sync,
-    created_at: row.created_at,
-    updated_at: row.updated_at,
-    has_credentials: Boolean(row.secret_id),
-    configuration: parseConfig(row.configuration)
-  }));
+  const integrationIds = integrations.map((integration) => integration.id);
+  const secrets = integrationIds.length
+    ? await IntegrationSecret.findAll({
+        where: { integration_id: integrationIds },
+        attributes: ['integration_id'],
+        raw: true
+      })
+    : [];
+  const secretSet = new Set(secrets.map((secret) => secret.integration_id));
 
-  res.json(integrations);
+  res.json(
+    integrations.map((row) => ({
+      id: row.id,
+      type: row.type,
+      name: row.name,
+      is_active: Boolean(row.is_active),
+      last_sync: row.last_sync,
+      created_at: row.created_at,
+      updated_at: row.updated_at,
+      has_credentials: secretSet.has(row.id),
+      configuration: row.configuration || {}
+    }))
+  );
 });
 
-router.post('/connect', (req, res) => {
+router.post('/connect', async (req, res) => {
   const orgId = req.user.organization_id;
   const userId = req.user.id;
 
@@ -202,7 +210,7 @@ router.post('/connect', (req, res) => {
     return res.status(400).json({ error: 'Credentials are required to connect.' });
   }
 
-  const integrationId = upsertIntegration({
+  const integrationId = await upsertIntegration({
     orgId,
     userId,
     provider,
@@ -212,9 +220,27 @@ router.post('/connect', (req, res) => {
   });
 
   try {
-    storeCredentials({ orgId, integrationId, credentials });
+    await storeCredentials({ orgId, integrationId, credentials });
   } catch (error) {
     return res.status(500).json({ error: error.message || 'Failed to secure credentials.' });
+  }
+
+  if (AUTO_SYNC_ON_CONNECT && supportedProviders.has(provider)) {
+    setTimeout(async () => {
+      try {
+        await syncIntegration({
+          provider,
+          credentials,
+          metadata,
+          organizationId: orgId,
+          userId,
+          integrationId
+        });
+        await Integration.update({ last_sync: new Date() }, { where: { id: integrationId } });
+      } catch (error) {
+        console.error('Auto-sync after connect failed:', error.message || error);
+      }
+    }, 0);
   }
 
   return res.json({
@@ -320,7 +346,7 @@ oauthCallbackRouter.get('/:provider/callback', async (req, res) => {
       return res.status(400).json({ error: 'OAuth token not returned.' });
     }
 
-    const integrationId = upsertIntegration({
+    const integrationId = await upsertIntegration({
       orgId: statePayload.orgId,
       userId: statePayload.userId,
       provider,
@@ -332,7 +358,7 @@ oauthCallbackRouter.get('/:provider/callback', async (req, res) => {
       }
     });
 
-    storeCredentials({
+    await storeCredentials({
       orgId: statePayload.orgId,
       integrationId,
       credentials: tokenData
@@ -349,25 +375,126 @@ oauthCallbackRouter.get('/:provider/callback', async (req, res) => {
   }
 });
 
-router.post('/:id/disconnect', (req, res) => {
+router.post('/:id/disconnect', async (req, res) => {
   const orgId = req.user.organization_id;
-  const integrationId = Number(req.params.id);
+  const integrationId = req.params.id;
 
-  const integration = db.prepare(
-    'SELECT id FROM integrations WHERE id = ? AND organization_id = ?'
-  ).get(integrationId, orgId);
+  const integration = await Integration.findOne({ where: { id: integrationId, organization_id: orgId } });
 
   if (!integration) {
     return res.status(404).json({ error: 'Integration not found.' });
   }
 
-  db.prepare(
-    'UPDATE integrations SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?'
-  ).run(integrationId);
-
-  db.prepare('DELETE FROM integration_secrets WHERE integration_id = ?').run(integrationId);
+  await Integration.update({ is_active: false }, { where: { id: integrationId } });
+  await IntegrationSecret.destroy({ where: { integration_id: integrationId } });
 
   return res.json({ disconnected: true });
+});
+
+router.get('/:id/summary', async (req, res) => {
+  const orgId = req.user.organization_id;
+  const integrationId = req.params.id;
+
+  const integration = await Integration.findOne({
+    where: { id: integrationId, organization_id: orgId },
+    raw: true
+  });
+
+  if (!integration) {
+    return res.status(404).json({ error: 'Integration not found.' });
+  }
+
+  const provider = integration.type;
+  const supported = supportedProviders.has(provider);
+
+  if (provider === 'gmail' || provider === 'outlook') {
+    const total = await BusinessEmail.count({ where: { organization_id: orgId } });
+    const latest = await BusinessEmail.findOne({
+      where: { organization_id: orgId },
+      order: [['processed_at', 'DESC']],
+      attributes: ['processed_at'],
+      raw: true
+    });
+
+    return res.json({
+      provider,
+      supported,
+      last_sync: integration.last_sync,
+      entities: { email: total },
+      latest_activity: latest?.processed_at || null
+    });
+  }
+
+  const summaryRows = await IntegrationEvent.findAll({
+    where: { organization_id: orgId, provider },
+    attributes: ['entity_type', [fn('COUNT', col('id')), 'count']],
+    group: ['entity_type'],
+    raw: true
+  });
+
+  const entities = summaryRows.reduce((acc, row) => {
+    acc[row.entity_type] = Number(row.count);
+    return acc;
+  }, {});
+
+  res.json({
+    provider,
+    supported,
+    last_sync: integration.last_sync,
+    entities
+  });
+});
+
+router.post('/:id/sync', async (req, res) => {
+  const orgId = req.user.organization_id;
+  const userId = req.user.id;
+  const integrationId = req.params.id;
+
+  try {
+    const integration = await Integration.findOne({
+      where: { id: integrationId, organization_id: orgId }
+    });
+
+    if (!integration) {
+      return res.status(404).json({ error: 'Integration not found.' });
+    }
+
+    if (!integration.is_active) {
+      return res.status(400).json({ error: 'Integration is not active.' });
+    }
+
+    const record = await getIntegrationRecord(orgId, integration.type);
+    if (!record?.credentials) {
+      return res.status(400).json({ error: 'Integration credentials are missing.' });
+    }
+
+    if (!supportedProviders.has(integration.type)) {
+      return res.status(400).json({ error: 'Sync is not available for this provider yet.' });
+    }
+
+    const result = await syncIntegration({
+      provider: integration.type,
+      credentials: record.credentials,
+      metadata: record.configuration?.metadata || {},
+      organizationId: orgId,
+      userId,
+      integrationId: integration.id
+    });
+
+    const lastSync = new Date();
+    await Integration.update(
+      { last_sync: lastSync },
+      { where: { id: integration.id } }
+    );
+
+    res.json({
+      ...result,
+      last_sync: lastSync
+    });
+  } catch (error) {
+    console.error('Integration sync error:', error);
+    res.status(500).json({ error: error.message || 'Failed to sync integration.' });
+  }
 });
 
 export { oauthCallbackRouter };

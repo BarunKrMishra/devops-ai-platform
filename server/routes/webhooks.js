@@ -1,6 +1,7 @@
 import express from 'express';
 import crypto from 'crypto';
-import { db } from '../database/init.js';
+import { Op, fn, col, where } from 'sequelize';
+import { Webhook } from '../models/index.js';
 import { logAuditAction } from '../utils/audit.js';
 
 const router = express.Router();
@@ -11,29 +12,24 @@ router.get('/', async (req, res) => {
     const organizationId = req.user.organization_id;
     const { project_id } = req.query;
 
-    let query = `
-      SELECT w.*, u.name as created_by_name, p.name as project_name
-      FROM webhooks w
-      LEFT JOIN users u ON w.created_by = u.id
-      LEFT JOIN projects p ON w.project_id = p.id
-      WHERE w.organization_id = ?
-    `;
-    const params = [organizationId];
-
+    const filters = { organization_id: organizationId };
     if (project_id) {
-      query += ` AND w.project_id = ?`;
-      params.push(project_id);
+      filters.project_id = project_id;
     }
 
-    query += ` ORDER BY w.created_at DESC`;
+    const webhooks = await Webhook.findAll({
+      where: filters,
+      order: [['created_at', 'DESC']],
+      raw: true
+    });
 
-    const webhooks = db.prepare(query).all(...params);
-
-    res.json(webhooks.map(webhook => ({
-      ...webhook,
-      events: JSON.parse(webhook.events),
-      secret: webhook.secret ? '***' : null // Hide secret in response
-    })));
+    res.json(
+      webhooks.map((webhook) => ({
+        ...webhook,
+        events: webhook.events || [],
+        secret: webhook.secret ? '***' : null
+      }))
+    );
   } catch (error) {
     console.error('Webhooks fetch error:', error);
     res.status(500).json({ error: 'Failed to fetch webhooks' });
@@ -47,32 +43,28 @@ router.post('/', async (req, res) => {
     const userId = req.user.id;
     const organizationId = req.user.organization_id;
 
-    // Generate webhook secret
     const secret = crypto.randomBytes(32).toString('hex');
 
-    const result = db.prepare(`
-      INSERT INTO webhooks (organization_id, project_id, name, url, events, secret, created_by)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      organizationId,
-      project_id || null,
+    const webhook = await Webhook.create({
+      organization_id: organizationId,
+      project_id: project_id || null,
       name,
       url,
-      JSON.stringify(events),
+      events: events || [],
       secret,
-      userId
-    );
+      created_by: userId
+    });
 
-    await logAuditAction(userId, 'CREATE_WEBHOOK', 'webhook', result.lastInsertRowid, {
+    await logAuditAction(userId, 'CREATE_WEBHOOK', 'webhook', webhook.id, {
       name,
       url,
       events
     });
 
-    res.json({ 
-      id: result.lastInsertRowid, 
+    res.json({
+      id: webhook.id,
       secret,
-      message: 'Webhook created successfully' 
+      message: 'Webhook created successfully'
     });
   } catch (error) {
     console.error('Webhook creation error:', error);
@@ -88,21 +80,21 @@ router.put('/:id', async (req, res) => {
     const userId = req.user.id;
     const organizationId = req.user.organization_id;
 
-    // Verify webhook belongs to organization
-    const webhook = db.prepare(`
-      SELECT id FROM webhooks 
-      WHERE id = ? AND organization_id = ?
-    `).get(id, organizationId);
+    const webhook = await Webhook.findOne({ where: { id, organization_id: organizationId }, raw: true });
 
     if (!webhook) {
       return res.status(404).json({ error: 'Webhook not found' });
     }
 
-    db.prepare(`
-      UPDATE webhooks 
-      SET name = ?, url = ?, events = ?, is_active = ?
-      WHERE id = ?
-    `).run(name, url, JSON.stringify(events), is_active, id);
+    await Webhook.update(
+      {
+        name: name ?? webhook.name,
+        url: url ?? webhook.url,
+        events: events ?? webhook.events,
+        is_active: is_active ?? webhook.is_active
+      },
+      { where: { id } }
+    );
 
     await logAuditAction(userId, 'UPDATE_WEBHOOK', 'webhook', id, {
       name,
@@ -125,17 +117,13 @@ router.delete('/:id', async (req, res) => {
     const userId = req.user.id;
     const organizationId = req.user.organization_id;
 
-    // Verify webhook belongs to organization
-    const webhook = db.prepare(`
-      SELECT name FROM webhooks 
-      WHERE id = ? AND organization_id = ?
-    `).get(id, organizationId);
+    const webhook = await Webhook.findOne({ where: { id, organization_id: organizationId }, raw: true });
 
     if (!webhook) {
       return res.status(404).json({ error: 'Webhook not found' });
     }
 
-    db.prepare('DELETE FROM webhooks WHERE id = ?').run(id);
+    await Webhook.destroy({ where: { id } });
 
     await logAuditAction(userId, 'DELETE_WEBHOOK', 'webhook', id, {
       name: webhook.name
@@ -151,12 +139,26 @@ router.delete('/:id', async (req, res) => {
 // Trigger webhook (internal function)
 export const triggerWebhook = async (event, data) => {
   try {
-    const webhooks = db.prepare(`
-      SELECT * FROM webhooks 
-      WHERE is_active = 1 
-      AND (project_id IS NULL OR project_id = ?)
-      AND JSON_EXTRACT(events, '$') LIKE '%${event}%'
-    `).all(data.project_id || null);
+    const organizationId = data.organization_id;
+    if (!organizationId) {
+      return;
+    }
+
+    const projectFilter = data.project_id
+      ? { [Op.or]: [{ project_id: null }, { project_id: data.project_id }] }
+      : { project_id: null };
+
+    const webhooks = await Webhook.findAll({
+      where: {
+        organization_id: organizationId,
+        is_active: true,
+        ...projectFilter,
+        [Op.and]: [
+          where(fn('JSON_CONTAINS', col('events'), JSON.stringify(event)), 1)
+        ]
+      },
+      raw: true
+    });
 
     for (const webhook of webhooks) {
       try {
@@ -171,13 +173,9 @@ export const triggerWebhook = async (event, data) => {
           .update(JSON.stringify(payload))
           .digest('hex');
 
-        // In production, make HTTP request to webhook URL
-        console.log(`Triggering webhook ${webhook.name}: ${webhook.url}`, payload);
+        console.log(`Triggering webhook ${webhook.name}: ${webhook.url}`, payload, signature);
 
-        // Update last triggered timestamp
-        db.prepare('UPDATE webhooks SET last_triggered = CURRENT_TIMESTAMP WHERE id = ?')
-          .run(webhook.id);
-
+        await Webhook.update({ last_triggered: new Date() }, { where: { id: webhook.id } });
       } catch (error) {
         console.error(`Webhook ${webhook.id} failed:`, error);
       }
@@ -194,10 +192,7 @@ router.post('/:id/test', async (req, res) => {
     const userId = req.user.id;
     const organizationId = req.user.organization_id;
 
-    const webhook = db.prepare(`
-      SELECT * FROM webhooks 
-      WHERE id = ? AND organization_id = ?
-    `).get(id, organizationId);
+    const webhook = await Webhook.findOne({ where: { id, organization_id: organizationId }, raw: true });
 
     if (!webhook) {
       return res.status(404).json({ error: 'Webhook not found' });
@@ -206,7 +201,8 @@ router.post('/:id/test', async (req, res) => {
     await triggerWebhook('webhook.test', {
       webhook_id: id,
       triggered_by: userId,
-      message: 'This is a test webhook'
+      message: 'This is a test webhook',
+      organization_id: organizationId
     });
 
     res.json({ message: 'Test webhook sent successfully' });

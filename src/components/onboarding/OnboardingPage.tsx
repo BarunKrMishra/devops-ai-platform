@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import axios from 'axios';
 import { useAuth } from '../../contexts/AuthContext';
 import { CheckCircle } from 'lucide-react';
+import { getApiErrorMessage } from '../../utils/apiError';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
@@ -141,8 +142,8 @@ const OnboardingPage: React.FC = () => {
 
       await refreshOnboarding();
       setSuccess('Thanks! Your onboarding details are saved. Live data access is now unlocked.');
-    } catch (submitError: any) {
-      setError(submitError.response?.data?.error || 'Failed to save onboarding details.');
+    } catch (submitError) {
+      setError(getApiErrorMessage(submitError, 'Failed to save onboarding details.'));
     } finally {
       setLoading(false);
     }
@@ -329,7 +330,7 @@ const OnboardingPage: React.FC = () => {
 
             {aiIntegration && (
               <p className="text-xs text-slate-400">
-                We will collect AI credentials and integration details during the go-live request.
+                We will collect AI credentials and integration details during the activation request.
               </p>
             )}
           </div>

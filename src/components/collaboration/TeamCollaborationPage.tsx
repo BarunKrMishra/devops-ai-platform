@@ -5,6 +5,7 @@ import { Users, UserPlus, ShieldCheck, PlusCircle } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import SkeletonBlock from '../ui/SkeletonBlock';
 import EmptyState from '../ui/EmptyState';
+import { getApiErrorMessage } from '../../utils/apiError';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
@@ -22,6 +23,9 @@ type Member = {
   email: string;
   role: string;
   last_login?: string | null;
+  permissions?: {
+    ops_access?: string[];
+  };
 };
 
 type Team = {
@@ -31,11 +35,18 @@ type Team = {
   members: Member[];
 };
 
+type OpsModule = {
+  key: string;
+  name: string;
+  category: string;
+};
+
 const TeamCollaborationPage: React.FC = () => {
   const { user } = useAuth();
   const [organization, setOrganization] = useState<Organization | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
   const [teams, setTeams] = useState<Team[]>([]);
+  const [opsModules, setOpsModules] = useState<OpsModule[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [status, setStatus] = useState('');
@@ -50,6 +61,10 @@ const TeamCollaborationPage: React.FC = () => {
     teamIds: [] as number[]
   });
   const [memberRoleDrafts, setMemberRoleDrafts] = useState<Record<number, string>>({});
+  const [memberOpsDrafts, setMemberOpsDrafts] = useState<Record<number, string[]>>({});
+  const [memberAccessMode, setMemberAccessMode] = useState<Record<number, 'all' | 'custom'>>({});
+  const [memberAccessOpen, setMemberAccessOpen] = useState<Record<number, boolean>>({});
+  const [permissionSaving, setPermissionSaving] = useState<Record<number, boolean>>({});
   const [teamMemberSelection, setTeamMemberSelection] = useState<Record<number, string>>({});
 
   const isManager = user?.role === 'admin' || user?.role === 'manager';
@@ -64,22 +79,45 @@ const TeamCollaborationPage: React.FC = () => {
     return { used, pending, limit };
   }, [organization]);
 
+  const opsNameMap = useMemo(() => {
+    return opsModules.reduce((acc: Record<string, string>, module) => {
+      acc[module.key] = module.name;
+      return acc;
+    }, {});
+  }, [opsModules]);
+
   const loadData = async () => {
     setLoading(true);
     setError('');
     try {
-      const [orgRes, membersRes, teamsRes] = await Promise.all([
+      const [orgRes, membersRes, teamsRes, opsRes] = await Promise.all([
         axios.get(`${API_URL}/api/organizations`),
         axios.get(`${API_URL}/api/organizations/members`),
-        axios.get(`${API_URL}/api/teams`)
+        axios.get(`${API_URL}/api/teams`),
+        axios.get(`${API_URL}/api/ops/modules`)
       ]);
 
       setOrganization(orgRes.data);
       setSeatLimit(orgRes.data.seat_limit ? String(orgRes.data.seat_limit) : '');
       setMembers(membersRes.data);
+      setOpsModules(opsRes.data);
       setMemberRoleDrafts(
         membersRes.data.reduce((acc: Record<number, string>, member: Member) => {
           acc[member.id] = member.role;
+          return acc;
+        }, {})
+      );
+      const moduleKeys = opsRes.data.map((module: OpsModule) => module.key);
+      setMemberOpsDrafts(
+        membersRes.data.reduce((acc: Record<number, string[]>, member: Member) => {
+          const access = member.permissions?.ops_access;
+          acc[member.id] = Array.isArray(access) ? access : moduleKeys;
+          return acc;
+        }, {})
+      );
+      setMemberAccessMode(
+        membersRes.data.reduce((acc: Record<number, 'all' | 'custom'>, member: Member) => {
+          acc[member.id] = Array.isArray(member.permissions?.ops_access) ? 'custom' : 'all';
           return acc;
         }, {})
       );
@@ -89,6 +127,39 @@ const TeamCollaborationPage: React.FC = () => {
       setError('Unable to load team data. Please try again.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handlePermissionsSave = async (memberId: number) => {
+    setError('');
+    setStatus('');
+    if (!isManager) {
+      setError('You do not have permission to update access.');
+      return;
+    }
+    if (memberId === user?.id) {
+      setError('You cannot change your own access.');
+      return;
+    }
+    const mode = memberAccessMode[memberId] || 'all';
+    const opsAccess = mode === 'all' ? null : memberOpsDrafts[memberId] || [];
+
+    setPermissionSaving((prev) => ({ ...prev, [memberId]: true }));
+    try {
+      const response = await axios.put(`${API_URL}/api/organizations/members/${memberId}/permissions`, {
+        ops_access: opsAccess
+      });
+      setMembers((prev) =>
+        prev.map((member) =>
+          member.id === memberId ? { ...member, permissions: response.data.permissions } : member
+        )
+      );
+      setStatus('Access updated.');
+      setMemberAccessOpen((prev) => ({ ...prev, [memberId]: false }));
+    } catch (err) {
+      setError(getApiErrorMessage(err, 'Failed to update access.'));
+    } finally {
+      setPermissionSaving((prev) => ({ ...prev, [memberId]: false }));
     }
   };
 
@@ -114,8 +185,8 @@ const TeamCollaborationPage: React.FC = () => {
       });
       setStatus('Seat limit updated.');
       await loadData();
-    } catch (err: any) {
-      setError(err.response?.data?.error || 'Failed to update seat limit.');
+    } catch (err) {
+      setError(getApiErrorMessage(err, 'Failed to update seat limit.'));
     }
   };
 
@@ -139,8 +210,8 @@ const TeamCollaborationPage: React.FC = () => {
       setTeamForm({ name: '', description: '' });
       setStatus('Team created successfully.');
       await loadData();
-    } catch (err: any) {
-      setError(err.response?.data?.error || 'Failed to create team.');
+    } catch (err) {
+      setError(getApiErrorMessage(err, 'Failed to create team.'));
     }
   };
 
@@ -174,8 +245,8 @@ const TeamCollaborationPage: React.FC = () => {
         setStatus('Invite sent successfully.');
       }
       await loadData();
-    } catch (err: any) {
-      setError(err.response?.data?.error || 'Failed to send invite.');
+    } catch (err) {
+      setError(getApiErrorMessage(err, 'Failed to send invite.'));
     }
   };
 
@@ -217,8 +288,8 @@ const TeamCollaborationPage: React.FC = () => {
       await axios.put(`${API_URL}/api/organizations/members/${memberId}/role`, { role });
       setStatus('Role updated.');
       await loadData();
-    } catch (err: any) {
-      setError(err.response?.data?.error || 'Failed to update role.');
+    } catch (err) {
+      setError(getApiErrorMessage(err, 'Failed to update role.'));
     }
   };
 
@@ -237,8 +308,8 @@ const TeamCollaborationPage: React.FC = () => {
       await axios.delete(`${API_URL}/api/organizations/members/${memberId}`);
       setStatus('Member removed.');
       await loadData();
-    } catch (err: any) {
-      setError(err.response?.data?.error || 'Failed to remove member.');
+    } catch (err) {
+      setError(getApiErrorMessage(err, 'Failed to remove member.'));
     }
   };
 
@@ -259,8 +330,8 @@ const TeamCollaborationPage: React.FC = () => {
       setTeamMemberSelection((prev) => ({ ...prev, [teamId]: '' }));
       setStatus('Member added to team.');
       await loadData();
-    } catch (err: any) {
-      setError(err.response?.data?.error || 'Failed to add member.');
+    } catch (err) {
+      setError(getApiErrorMessage(err, 'Failed to add member.'));
     }
   };
 
@@ -275,8 +346,8 @@ const TeamCollaborationPage: React.FC = () => {
       await axios.delete(`${API_URL}/api/teams/${teamId}/members/${memberId}`);
       setStatus('Member removed from team.');
       await loadData();
-    } catch (err: any) {
-      setError(err.response?.data?.error || 'Failed to remove member from team.');
+    } catch (err) {
+      setError(getApiErrorMessage(err, 'Failed to remove member from team.'));
     }
   };
 
@@ -581,48 +652,128 @@ const TeamCollaborationPage: React.FC = () => {
               </p>
               <div className="mt-4 space-y-3">
                 {members.map((member) => (
-                  <div key={member.id} className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm text-white">{member.name || member.email}</p>
-                      <p className="text-xs text-slate-400">{member.email}</p>
+                  <div key={member.id} className="rounded-xl border border-white/10 bg-white/5 p-4">
+                    <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+                      <div>
+                        <p className="text-sm text-white">{member.name || member.email}</p>
+                        <p className="text-xs text-slate-400">{member.email}</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {isManager ? (
+                          <>
+                            <select
+                              value={memberRoleDrafts[member.id] || member.role}
+                              onChange={(event) =>
+                                setMemberRoleDrafts((prev) => ({ ...prev, [member.id]: event.target.value }))
+                              }
+                              className="text-xs bg-white/10 border border-white/20 text-white rounded-md px-2 py-1 focus:border-amber-400 focus:outline-none"
+                            >
+                              <option value="developer" className="bg-slate-900 text-slate-100">Developer</option>
+                              <option value="admin" className="bg-slate-900 text-slate-100">Admin</option>
+                              <option value="manager" className="bg-slate-900 text-slate-100">Manager</option>
+                              <option value="viewer" className="bg-slate-900 text-slate-100">Viewer</option>
+                              <option value="user" className="bg-slate-900 text-slate-100">User</option>
+                            </select>
+                            <button
+                              onClick={() => handleRoleSave(member.id)}
+                              disabled={memberRoleDrafts[member.id] === member.role || member.id === user?.id}
+                              className="text-xs text-amber-300 hover:text-amber-200 disabled:opacity-40"
+                            >
+                              Save role
+                            </button>
+                            <button
+                              onClick={() => handleRemoveMember(member.id)}
+                              disabled={member.id === user?.id}
+                              className="text-xs text-rose-300 hover:text-rose-200 disabled:opacity-40"
+                            >
+                              Remove
+                            </button>
+                          </>
+                        ) : (
+                          <span className="text-xs text-slate-300 bg-white/10 px-2 py-1 rounded-full capitalize">
+                            {member.role}
+                          </span>
+                        )}
+                      </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      {isManager ? (
-                        <>
-                          <select
-                            value={memberRoleDrafts[member.id] || member.role}
-                            onChange={(event) =>
-                              setMemberRoleDrafts((prev) => ({ ...prev, [member.id]: event.target.value }))
-                            }
-                            className="text-xs bg-white/10 border border-white/20 text-white rounded-md px-2 py-1 focus:border-amber-400 focus:outline-none"
-                          >
-                            <option value="developer" className="bg-slate-900 text-slate-100">Developer</option>
-                            <option value="admin" className="bg-slate-900 text-slate-100">Admin</option>
-                            <option value="manager" className="bg-slate-900 text-slate-100">Manager</option>
-                            <option value="viewer" className="bg-slate-900 text-slate-100">Viewer</option>
-                            <option value="user" className="bg-slate-900 text-slate-100">User</option>
-                          </select>
-                          <button
-                            onClick={() => handleRoleSave(member.id)}
-                            disabled={memberRoleDrafts[member.id] === member.role || member.id === user?.id}
-                            className="text-xs text-amber-300 hover:text-amber-200 disabled:opacity-40"
-                          >
-                            Save
-                          </button>
-                          <button
-                            onClick={() => handleRemoveMember(member.id)}
-                            disabled={member.id === user?.id}
-                            className="text-xs text-rose-300 hover:text-rose-200 disabled:opacity-40"
-                          >
-                            Remove
-                          </button>
-                        </>
-                      ) : (
-                        <span className="text-xs text-slate-300 bg-white/10 px-2 py-1 rounded-full capitalize">
-                          {member.role}
-                        </span>
+
+                    <div className="mt-4 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 text-sm">
+                      <div className="text-slate-300">
+                        <span className="text-slate-500">Ops access:</span>{' '}
+                        {memberAccessMode[member.id] === 'custom'
+                          ? (
+                              memberOpsDrafts[member.id]?.length
+                                ? memberOpsDrafts[member.id].map((key) => opsNameMap[key] || key).join(', ')
+                                : 'No access'
+                            )
+                          : 'All ops'}
+                      </div>
+                      {isManager && (
+                        <button
+                          onClick={() =>
+                            setMemberAccessOpen((prev) => ({ ...prev, [member.id]: !prev[member.id] }))
+                          }
+                          disabled={member.id === user?.id}
+                          className="text-xs text-amber-300 hover:text-amber-200 disabled:opacity-40"
+                        >
+                          {memberAccessOpen[member.id] ? 'Hide access' : 'Manage access'}
+                        </button>
                       )}
                     </div>
+
+                    {isManager && memberAccessOpen[member.id] && (
+                      <div className="mt-4 rounded-lg border border-white/10 bg-slate-950/40 p-4 space-y-3">
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                          <label className="flex items-center gap-2 text-xs text-slate-300">
+                            <input
+                              type="checkbox"
+                              checked={memberAccessMode[member.id] !== 'custom'}
+                              onChange={(event) =>
+                                setMemberAccessMode((prev) => ({
+                                  ...prev,
+                                  [member.id]: event.target.checked ? 'all' : 'custom'
+                                }))
+                              }
+                              className="h-4 w-4 rounded border-white/20 bg-white/10 text-amber-500 focus:ring-amber-400"
+                            />
+                            Full access to all ops
+                          </label>
+                          <button
+                            onClick={() => handlePermissionsSave(member.id)}
+                            disabled={permissionSaving[member.id]}
+                            className="px-3 py-2 rounded-lg bg-amber-500 text-white text-xs hover:bg-amber-600 transition-colors disabled:opacity-50"
+                          >
+                            {permissionSaving[member.id] ? 'Saving...' : 'Save access'}
+                          </button>
+                        </div>
+                        <p className="text-xs text-slate-500">
+                          Access changes apply the next time the member signs in.
+                        </p>
+                        {memberAccessMode[member.id] === 'custom' && (
+                          <div className="grid gap-2 sm:grid-cols-2">
+                            {opsModules.map((module) => (
+                              <label key={module.key} className="flex items-center gap-2 text-xs text-slate-300">
+                                <input
+                                  type="checkbox"
+                                  checked={memberOpsDrafts[member.id]?.includes(module.key)}
+                                  onChange={() =>
+                                    setMemberOpsDrafts((prev) => {
+                                      const existing = prev[member.id] || [];
+                                      const next = existing.includes(module.key)
+                                        ? existing.filter((item) => item !== module.key)
+                                        : [...existing, module.key];
+                                      return { ...prev, [member.id]: next };
+                                    })
+                                  }
+                                  className="h-4 w-4 rounded border-white/20 bg-white/10 text-amber-500 focus:ring-amber-400"
+                                />
+                                <span>{module.name}</span>
+                              </label>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 ))}
                 {members.length === 0 && (

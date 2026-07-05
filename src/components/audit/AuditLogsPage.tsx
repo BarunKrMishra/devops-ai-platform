@@ -10,11 +10,12 @@ const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 interface AuditLog {
   id: number;
   user_email: string;
+  user_name?: string | null;
   action: string;
   resource_type: string;
   resource_id: string;
-  details: any;
-  ip_address: string;
+  details: unknown;
+  ip_address: string | null;
   created_at: string;
 }
 
@@ -28,7 +29,7 @@ const AuditLogsPage: React.FC = () => {
   const [selectedLog, setSelectedLog] = useState<AuditLog | null>(null);
   
   const { user, token } = useAuth();
-  const isAdmin = user?.role === 'admin';
+  const canViewAll = user?.role === 'admin' || user?.role === 'manager';
 
   useEffect(() => {
     fetchAuditLogs();
@@ -40,7 +41,7 @@ const AuditLogsPage: React.FC = () => {
       return;
     }
     try {
-      const endpoint = isAdmin ? '/api/audit/logs' : '/api/audit/my-logs';
+      const endpoint = canViewAll ? '/api/audit/logs' : '/api/audit/my-logs';
       const params = new URLSearchParams({
         page: pagination.page.toString(),
         limit: pagination.limit.toString(),
@@ -82,6 +83,7 @@ const AuditLogsPage: React.FC = () => {
             log.resource_type,
             log.resource_id,
             log.user_email || '',
+            log.user_name || '',
             JSON.stringify(log.details || {})
           ]
             .join(' ')
@@ -97,11 +99,14 @@ const AuditLogsPage: React.FC = () => {
     });
   }, [logs, searchTerm, dateRange]);
 
-  const parseDetails = (details: any) => {
+  const parseDetails = (details: unknown): unknown => {
     if (!details) {
       return null;
     }
     if (typeof details === 'object') {
+      return details;
+    }
+    if (typeof details !== 'string') {
       return details;
     }
     try {
@@ -177,10 +182,10 @@ const AuditLogsPage: React.FC = () => {
       <div className="container mx-auto px-6 py-8">
         <div className="mb-8">
           <h1 className="text-3xl font-bold text-white mb-2">
-            {isAdmin ? 'Audit Logs' : 'My Activity'}
+            {canViewAll ? 'Audit Logs' : 'My Activity'}
           </h1>
           <p className="text-slate-400">
-            {isAdmin ? 'Monitor all system activities and user actions' : 'View your account activity history'}
+            {canViewAll ? 'Monitor all system activities and user actions' : 'View your account activity history'}
           </p>
         </div>
 
@@ -264,7 +269,7 @@ const AuditLogsPage: React.FC = () => {
               </button>
             </div>
 
-            {isAdmin && (
+            {canViewAll && (
               <button
                 onClick={exportLogs}
                 className="flex items-center space-x-2 px-4 py-2 bg-slate-600 text-white rounded-lg hover:bg-slate-700 transition-colors"
@@ -283,7 +288,7 @@ const AuditLogsPage: React.FC = () => {
               <thead className="bg-white/5 border-b border-white/10">
                 <tr>
                   <th className="px-6 py-4 text-left text-sm font-medium text-slate-300">Timestamp</th>
-                  {isAdmin && <th className="px-6 py-4 text-left text-sm font-medium text-slate-300">User</th>}
+                  {canViewAll && <th className="px-6 py-4 text-left text-sm font-medium text-slate-300">User</th>}
                   <th className="px-6 py-4 text-left text-sm font-medium text-slate-300">Action</th>
                   <th className="px-6 py-4 text-left text-sm font-medium text-slate-300">Resource</th>
                   <th className="px-6 py-4 text-left text-sm font-medium text-slate-300">Details</th>
@@ -299,11 +304,16 @@ const AuditLogsPage: React.FC = () => {
                         <span>{new Date(log.created_at).toLocaleString()}</span>
                       </div>
                     </td>
-                    {isAdmin && (
+                    {canViewAll && (
                       <td className="px-6 py-4 text-sm text-slate-300">
                         <div className="flex items-center space-x-2">
                           <User className="h-4 w-4 text-slate-400" />
-                          <span>{log.user_email}</span>
+                          <div>
+                            <div>{log.user_name || log.user_email}</div>
+                            {log.user_name && log.user_email && (
+                              <div className="text-xs text-slate-500">{log.user_email}</div>
+                            )}
+                          </div>
                         </div>
                       </td>
                     )}
@@ -393,11 +403,12 @@ const AuditLogsPage: React.FC = () => {
                         <span className="text-slate-400">Timestamp:</span>{' '}
                         {new Date(selectedLog.created_at).toLocaleString()}
                       </div>
-                      {isAdmin && (
-                        <div>
-                          <span className="text-slate-400">User:</span> {selectedLog.user_email}
-                        </div>
-                      )}
+                      <div>
+                        <span className="text-slate-400">Initiated by:</span>{' '}
+                        {selectedLog.user_name
+                          ? `${selectedLog.user_name} (${selectedLog.user_email})`
+                          : selectedLog.user_email || 'Unknown'}
+                      </div>
                       <div>
                         <span className="text-slate-400">Action:</span> {selectedLog.action}
                       </div>
@@ -406,7 +417,8 @@ const AuditLogsPage: React.FC = () => {
                         {selectedLog.resource_type} #{selectedLog.resource_id}
                       </div>
                       <div>
-                        <span className="text-slate-400">IP Address:</span> {selectedLog.ip_address}
+                        <span className="text-slate-400">IP Address:</span>{' '}
+                        {selectedLog.ip_address || 'Unknown'}
                       </div>
                       <div>
                         <span className="text-slate-400">Details:</span>
@@ -438,4 +450,3 @@ const AuditLogsPage: React.FC = () => {
 };
 
 export default AuditLogsPage;
-

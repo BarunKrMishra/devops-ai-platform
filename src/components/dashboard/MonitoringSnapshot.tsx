@@ -16,9 +16,23 @@ type Alert = {
   resolved: boolean;
 };
 
+type MetricPoint = { value: number };
+
+type MetricsData = {
+  requires_integration?: boolean;
+  data_available?: boolean;
+  data_source?: string;
+  message?: string;
+  guidance?: string;
+  uptime?: number;
+  cpu?: MetricPoint[];
+  memory?: MetricPoint[];
+  responseTime?: MetricPoint[];
+};
+
 const MonitoringSnapshot: React.FC = () => {
   const { token } = useAuth();
-  const [metrics, setMetrics] = useState<any>(null);
+  const [metrics, setMetrics] = useState<MetricsData | null>(null);
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');

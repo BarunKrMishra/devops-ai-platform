@@ -1,11 +1,14 @@
 import express from 'express';
 import { Octokit } from '@octokit/rest';
 import axios from 'axios';
-import { db } from '../database/init.js';
+import { User, Project, Deployment } from '../models/index.js';
 import { logAuditAction } from '../utils/audit.js';
 import { getIntegrationRecord } from '../utils/integrations.js';
+import { requireOpsAccess } from '../middleware/auth.js';
+import { requireOpsEnabled } from '../middleware/ops.js';
 
 const router = express.Router();
+router.use(requireOpsAccess('aidevops'), requireOpsEnabled('aidevops'));
 
 const extractToken = (credentials) =>
   credentials?.access_token || credentials?.token || credentials?.api_token || credentials?.pat || null;
@@ -30,11 +33,11 @@ router.get('/repositories', async (req, res) => {
     }
 
     // Check if user has GitHub token
-    const user = db.prepare('SELECT github_token FROM users WHERE id = ?').get(userId);
+    const user = await User.findByPk(userId, { attributes: ['github_token'], raw: true });
     let githubToken = user?.github_token;
 
     if (!githubToken) {
-      const integration = getIntegrationRecord(orgId, 'github');
+      const integration = await getIntegrationRecord(orgId, 'github');
       githubToken = extractToken(integration?.credentials);
     }
 
@@ -67,7 +70,7 @@ router.get('/repositories', async (req, res) => {
       return res.json(repositories);
     }
 
-    const gitlabIntegration = getIntegrationRecord(orgId, 'gitlab');
+    const gitlabIntegration = await getIntegrationRecord(orgId, 'gitlab');
     const gitlabToken = extractToken(gitlabIntegration?.credentials);
 
     if (!gitlabToken) {
@@ -121,35 +124,26 @@ router.get('/pipelines', async (req, res) => {
     const orgId = req.user.organization_id;
     
     // Get projects with their pipelines
-    const projects = db.prepare(
-      `SELECT p.*, 
-              COUNT(d.id) as deployment_count,
-              MAX(d.created_at) as last_deployment
-       FROM projects p
-       LEFT JOIN deployments d ON p.id = d.project_id
-       WHERE p.user_id = ?
-       GROUP BY p.id
-       ORDER BY p.created_at DESC`
-    ).all(userId);
-
-    // Get recent deployments for each project
-    const projectsWithDeployments = projects.map(project => {
-      const deployments = db.prepare(
-        `SELECT d.*, 
-                p.name as project_name,
-                p.repository_url
-         FROM deployments d
-         JOIN projects p ON d.project_id = p.id
-         WHERE d.project_id = ?
-         ORDER BY d.created_at DESC
-         LIMIT 5`
-      ).all(project.id);
-      
-      return {
-        ...project,
-        deployments
-      };
+    const projects = await Project.findAll({
+      where: { user_id: userId },
+      order: [['created_at', 'DESC']],
+      raw: true
     });
+
+    const projectsWithDeployments = await Promise.all(
+      projects.map(async (project) => {
+        const deployments = await Deployment.findAll({
+          where: { project_id: project.id },
+          order: [['created_at', 'DESC']],
+          limit: 5,
+          raw: true
+        });
+        return {
+          ...project,
+          deployments
+        };
+      })
+    );
 
     const pipelines = projectsWithDeployments.map((project) => ({
       id: project.id,
@@ -164,7 +158,7 @@ router.get('/pipelines', async (req, res) => {
 
     const externalPipelines = [];
 
-    const githubIntegration = getIntegrationRecord(orgId, 'github');
+    const githubIntegration = await getIntegrationRecord(orgId, 'github');
     const githubToken = extractToken(githubIntegration?.credentials);
     if (githubToken) {
       try {
@@ -208,7 +202,7 @@ router.get('/pipelines', async (req, res) => {
       }
     }
 
-    const gitlabIntegration = getIntegrationRecord(orgId, 'gitlab');
+    const gitlabIntegration = await getIntegrationRecord(orgId, 'gitlab');
     const gitlabToken = extractToken(gitlabIntegration?.credentials);
     if (gitlabToken) {
       try {
@@ -263,7 +257,7 @@ router.get('/pipelines', async (req, res) => {
       }
     }
 
-    const jenkinsIntegration = getIntegrationRecord(orgId, 'jenkins');
+    const jenkinsIntegration = await getIntegrationRecord(orgId, 'jenkins');
     if (jenkinsIntegration?.credentials && jenkinsIntegration?.configuration) {
       const metadata = jenkinsIntegration.configuration?.metadata || {};
       const baseUrl = metadata.base_url || metadata.url || null;
@@ -352,31 +346,16 @@ router.post('/pipeline', async (req, res) => {
     }
 
     // Create project
-    const stmt = db.prepare(
-      `INSERT INTO projects (
-        user_id,
-        organization_id,
-        name,
-        repository_url,
-        branch,
-        framework,
-        cloud_provider,
-        status
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-    );
-    
-    const info = stmt.run(
-      userId,
-      organizationId,
-      repositoryUrl.split('/').pop(),
-      repositoryUrl,
+    const project = await Project.create({
+      user_id: userId,
+      organization_id: organizationId,
+      name: repositoryUrl.split('/').pop(),
+      repository_url: repositoryUrl,
       branch,
       framework,
-      cloudProvider,
-      'active'
-    );
-
-    const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(info.lastInsertRowid);
+      cloud_provider: cloudProvider,
+      status: 'active'
+    });
 
     // Generate CI/CD configuration based on framework
     const pipelineConfig = generatePipelineConfig(framework, cloudProvider);
@@ -408,12 +387,7 @@ router.post('/deploy/:projectId', async (req, res) => {
     const userId = req.user.id;
 
     // Get project with user verification
-    const project = db.prepare(
-      `SELECT p.*, u.id as user_id 
-       FROM projects p
-       JOIN users u ON p.user_id = u.id
-       WHERE p.id = ? AND p.user_id = ?`
-    ).get(projectId, userId);
+    const project = await Project.findOne({ where: { id: projectId, user_id: userId }, raw: true });
 
     if (!project) {
       return res.status(404).json({ 
@@ -422,14 +396,11 @@ router.post('/deploy/:projectId', async (req, res) => {
     }
 
     // Check if there's already a running deployment
-    const runningDeployment = db.prepare(
-      `SELECT d.*, p.name as project_name
-       FROM deployments d
-       JOIN projects p ON d.project_id = p.id
-       WHERE d.project_id = ? AND d.status = ?
-       ORDER BY d.created_at DESC
-       LIMIT 1`
-    ).get(projectId, 'running');
+    const runningDeployment = await Deployment.findOne({
+      where: { project_id: projectId, status: 'running' },
+      order: [['created_at', 'DESC']],
+      raw: true
+    });
 
     if (runningDeployment) {
       return res.status(409).json({ 
@@ -438,48 +409,29 @@ router.post('/deploy/:projectId', async (req, res) => {
     }
 
     // Create deployment record
-    const insertStmt = db.prepare(
-      `INSERT INTO deployments (
-        project_id, 
-        status, 
-        environment, 
-        commit_hash,
-        started_at
-      ) VALUES (?, ?, ?, ?, ?)`
-    );
-    
-    const info = insertStmt.run(
-      projectId, 
-      'running', 
-      environment, 
-      'latest',
-      new Date().toISOString()
-    );
-
-    const deployment = db.prepare(
-      `SELECT d.*, p.name as project_name
-       FROM deployments d
-       JOIN projects p ON d.project_id = p.id
-       WHERE d.id = ?`
-    ).get(info.lastInsertRowid);
+    const deployment = await Deployment.create({
+      organization_id: project.organization_id,
+      project_id: projectId,
+      status: 'running',
+      environment,
+      commit_hash: 'latest',
+      started_at: new Date(),
+      deployed_by: userId
+    });
 
     // Simulate deployment process
     setTimeout(() => {
       const success = Math.random() > 0.2; // 80% success rate
       const duration = Math.floor(Math.random() * 300) + 60; // 1-5 minutes
 
-      db.prepare(
-        `UPDATE deployments 
-         SET status = ?, 
-             duration = ?,
-             completed_at = ?
-         WHERE id = ?`
-      ).run(
-        success ? 'success' : 'failed',
-        duration,
-        new Date().toISOString(),
-        deployment.id
-      );
+      Deployment.update(
+        {
+          status: success ? 'success' : 'failed',
+          duration,
+          completed_at: new Date()
+        },
+        { where: { id: deployment.id } }
+      ).catch((updateError) => console.error('Deployment update error:', updateError));
     }, 2000);
 
     // Log audit action
@@ -488,7 +440,7 @@ router.post('/deploy/:projectId', async (req, res) => {
       environment
     });
 
-    res.json(deployment);
+    res.json(deployment.toJSON());
   } catch (error) {
     console.error('Deployment error:', error);
     res.status(500).json({ 

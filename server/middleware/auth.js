@@ -23,10 +23,48 @@ export const authenticateToken = (req, res, next) => {
   });
 };
 
+const resolvePermissions = (user) => {
+  if (!user || user.permissions === undefined || user.permissions === null) {
+    return {};
+  }
+  if (typeof user.permissions === 'string') {
+    try {
+      return JSON.parse(user.permissions);
+    } catch (error) {
+      return {};
+    }
+  }
+  return user.permissions;
+};
+
+export const hasOpsAccess = (user, moduleKey) => {
+  if (!user || !moduleKey) {
+    return false;
+  }
+  if (user.role === 'admin' || user.role === 'manager') {
+    return true;
+  }
+  const permissions = resolvePermissions(user);
+  const opsAccess = permissions.ops_access;
+  if (!Array.isArray(opsAccess)) {
+    return true;
+  }
+  return opsAccess.includes(moduleKey);
+};
+
 // Middleware to require a specific role or roles
 export const requireRole = (roles) => {
   return (req, res, next) => {
     if (!req.user || !roles.includes(req.user.role)) {
+      return res.status(403).json({ error: 'Insufficient permissions' });
+    }
+    next();
+  };
+};
+
+export const requireOpsAccess = (moduleKey) => {
+  return (req, res, next) => {
+    if (!hasOpsAccess(req.user, moduleKey)) {
       return res.status(403).json({ error: 'Insufficient permissions' });
     }
     next();

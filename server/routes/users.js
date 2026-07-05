@@ -1,7 +1,7 @@
 import express from 'express';
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
-import { db } from '../database/init.js';
+import { User, UserSetting, UserApiKey } from '../models/index.js';
 import { logAuditAction } from '../utils/audit.js';
 
 const router = express.Router();
@@ -13,8 +13,8 @@ const defaultNotifications = {
   weeklyReports: true
 };
 
-const getUserSettings = (userId) => {
-  const settings = db.prepare('SELECT notifications, experience FROM user_settings WHERE user_id = ?').get(userId);
+const getUserSettings = async (userId) => {
+  const settings = await UserSetting.findOne({ where: { user_id: userId }, raw: true });
   if (!settings) {
     return {
       notifications: defaultNotifications,
@@ -23,42 +23,42 @@ const getUserSettings = (userId) => {
   }
 
   return {
-    notifications: settings.notifications ? JSON.parse(settings.notifications) : defaultNotifications,
-    experience: settings.experience ? JSON.parse(settings.experience) : {}
+    notifications: settings.notifications || defaultNotifications,
+    experience: settings.experience || {}
   };
 };
 
-const upsertUserSettings = (userId, { notifications, experience }) => {
-  const existing = db.prepare('SELECT user_id, notifications, experience FROM user_settings WHERE user_id = ?').get(userId);
-  const nextNotifications = notifications ?? (existing?.notifications ? JSON.parse(existing.notifications) : defaultNotifications);
-  const nextExperience = experience ?? (existing?.experience ? JSON.parse(existing.experience) : {});
+const upsertUserSettings = async (userId, { notifications, experience }) => {
+  const existing = await UserSetting.findOne({ where: { user_id: userId } });
+  const nextNotifications = notifications ?? (existing?.notifications || defaultNotifications);
+  const nextExperience = experience ?? (existing?.experience || {});
 
   if (existing) {
-    db.prepare(`
-      UPDATE user_settings
-      SET notifications = ?, experience = ?, updated_at = CURRENT_TIMESTAMP
-      WHERE user_id = ?
-    `).run(JSON.stringify(nextNotifications), JSON.stringify(nextExperience), userId);
+    await UserSetting.update(
+      { notifications: nextNotifications, experience: nextExperience },
+      { where: { user_id: userId } }
+    );
   } else {
-    db.prepare(`
-      INSERT INTO user_settings (user_id, notifications, experience)
-      VALUES (?, ?, ?)
-    `).run(userId, JSON.stringify(nextNotifications), JSON.stringify(nextExperience));
+    await UserSetting.create({
+      user_id: userId,
+      notifications: nextNotifications,
+      experience: nextExperience
+    });
   }
 
   return { notifications: nextNotifications, experience: nextExperience };
 };
 
-router.get('/me', (req, res) => {
+router.get('/me', async (req, res) => {
   try {
     const userId = req.user.id;
-    const user = db.prepare('SELECT id, email, name, role FROM users WHERE id = ?').get(userId);
+    const user = await User.findByPk(userId, { attributes: ['id', 'email', 'name', 'role'], raw: true });
 
     if (!user) {
       return res.status(404).json({ error: 'User not found.' });
     }
 
-    const settings = getUserSettings(userId);
+    const settings = await getUserSettings(userId);
 
     res.json({
       user,
@@ -75,7 +75,7 @@ router.patch('/me', async (req, res) => {
     const userId = req.user.id;
     const { name, email } = req.body;
 
-    const current = db.prepare('SELECT id, email, name FROM users WHERE id = ?').get(userId);
+    const current = await User.findByPk(userId, { attributes: ['id', 'email', 'name', 'role'], raw: true });
     if (!current) {
       return res.status(404).json({ error: 'User not found.' });
     }
@@ -86,8 +86,8 @@ router.patch('/me', async (req, res) => {
       if (!emailRegex.test(email)) {
         return res.status(400).json({ error: 'Invalid email format.' });
       }
-      const existing = db.prepare('SELECT id FROM users WHERE email = ? AND id != ?').get(email, userId);
-      if (existing) {
+      const existing = await User.findOne({ where: { email }, raw: true });
+      if (existing && existing.id !== userId) {
         return res.status(400).json({ error: 'Email already in use.' });
       }
       nextEmail = email;
@@ -95,8 +95,10 @@ router.patch('/me', async (req, res) => {
 
     const nextName = name ?? current.name;
 
-    db.prepare('UPDATE users SET name = ?, email = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
-      .run(nextName, nextEmail, userId);
+    await User.update(
+      { name: nextName, email: nextEmail },
+      { where: { id: userId } }
+    );
 
     await logAuditAction(userId, 'UPDATE_PROFILE', 'user', userId, {
       name: nextName,
@@ -108,7 +110,7 @@ router.patch('/me', async (req, res) => {
         id: current.id,
         name: nextName,
         email: nextEmail,
-        role: req.user.role
+        role: current.role
       }
     });
   } catch (error) {
@@ -117,7 +119,7 @@ router.patch('/me', async (req, res) => {
   }
 });
 
-router.patch('/me/notifications', (req, res) => {
+router.patch('/me/notifications', async (req, res) => {
   try {
     const userId = req.user.id;
     const payload = req.body.notifications || req.body;
@@ -126,7 +128,7 @@ router.patch('/me/notifications', (req, res) => {
       ...payload
     };
 
-    const updated = upsertUserSettings(userId, { notifications: normalized });
+    const updated = await upsertUserSettings(userId, { notifications: normalized });
 
     res.json({
       notifications: updated.notifications
@@ -137,11 +139,11 @@ router.patch('/me/notifications', (req, res) => {
   }
 });
 
-router.patch('/me/experience', (req, res) => {
+router.patch('/me/experience', async (req, res) => {
   try {
     const userId = req.user.id;
     const payload = req.body.experience || req.body;
-    const updated = upsertUserSettings(userId, { experience: payload || {} });
+    const updated = await upsertUserSettings(userId, { experience: payload || {} });
 
     res.json({
       experience: updated.experience
@@ -165,19 +167,21 @@ router.post('/me/change-password', async (req, res) => {
       return res.status(400).json({ error: 'New password must be at least 8 characters long.' });
     }
 
-    const user = db.prepare('SELECT password_hash FROM users WHERE id = ?').get(userId);
+    const user = await User.findByPk(userId, { attributes: ['password_hash'], raw: true });
     if (!user) {
       return res.status(404).json({ error: 'User not found.' });
     }
 
-    const validPassword = await bcrypt.compare(current_password, user.password_hash);
+    const validPassword = await bcrypt.compare(current_password, user.password_hash || '');
     if (!validPassword) {
       return res.status(400).json({ error: 'Current password is incorrect.' });
     }
 
     const passwordHash = await bcrypt.hash(new_password, 12);
-    db.prepare('UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
-      .run(passwordHash, userId);
+    await User.update(
+      { password_hash: passwordHash },
+      { where: { id: userId } }
+    );
 
     await logAuditAction(userId, 'CHANGE_PASSWORD', 'user', userId);
 
@@ -188,15 +192,14 @@ router.post('/me/change-password', async (req, res) => {
   }
 });
 
-router.get('/me/api-keys', (req, res) => {
+router.get('/me/api-keys', async (req, res) => {
   try {
     const userId = req.user.id;
-    const keys = db.prepare(`
-      SELECT id, name, last_four, created_at, last_used, is_active
-      FROM user_api_keys
-      WHERE user_id = ?
-      ORDER BY created_at DESC
-    `).all(userId);
+    const keys = await UserApiKey.findAll({
+      where: { user_id: userId },
+      order: [['created_at', 'DESC']],
+      raw: true
+    });
 
     res.json(keys);
   } catch (error) {
@@ -205,7 +208,7 @@ router.get('/me/api-keys', (req, res) => {
   }
 });
 
-router.post('/me/api-keys', (req, res) => {
+router.post('/me/api-keys', async (req, res) => {
   try {
     const userId = req.user.id;
     const { name } = req.body;
@@ -213,13 +216,15 @@ router.post('/me/api-keys', (req, res) => {
     const keyHash = crypto.createHash('sha256').update(rawKey).digest('hex');
     const lastFour = rawKey.slice(-4);
 
-    const result = db.prepare(`
-      INSERT INTO user_api_keys (user_id, name, key_hash, last_four)
-      VALUES (?, ?, ?, ?)
-    `).run(userId, name || 'Personal key', keyHash, lastFour);
+    const result = await UserApiKey.create({
+      user_id: userId,
+      name: name || 'Personal key',
+      key_hash: keyHash,
+      last_four: lastFour
+    });
 
     res.json({
-      id: result.lastInsertRowid,
+      id: result.id,
       key: rawKey,
       last_four: lastFour
     });
@@ -229,16 +234,12 @@ router.post('/me/api-keys', (req, res) => {
   }
 });
 
-router.delete('/me/api-keys/:id', (req, res) => {
+router.delete('/me/api-keys/:id', async (req, res) => {
   try {
     const userId = req.user.id;
     const { id } = req.params;
 
-    db.prepare(`
-      UPDATE user_api_keys
-      SET is_active = 0
-      WHERE id = ? AND user_id = ?
-    `).run(id, userId);
+    await UserApiKey.update({ is_active: false }, { where: { id, user_id: userId } });
 
     res.json({ message: 'API key revoked.' });
   } catch (error) {

@@ -1,58 +1,65 @@
-import { db } from '../database/init.js';
+import { Op } from 'sequelize';
+import { Organization, User, Project, Deployment, Integration, IntegrationSecret, OrganizationInvite, UsageMetric } from '../models/index.js';
 
 const METRIC_RUN_INTERVAL_MS = 15 * 60 * 1000;
 
-const insertMetric = (organizationId, metricType, value, unit) => {
-  db.prepare(
-    'INSERT INTO usage_metrics (organization_id, metric_type, value, unit) VALUES (?, ?, ?, ?)'
-  ).run(organizationId, metricType, value, unit);
+const insertMetric = async (organizationId, metricType, value, unit) => {
+  await UsageMetric.create({
+    organization_id: organizationId,
+    metric_type: metricType,
+    value,
+    unit
+  });
 };
 
-const collectOrgMetrics = (organizationId) => {
-  const activeUsers = db.prepare(
-    'SELECT COUNT(*) as count FROM users WHERE organization_id = ? AND is_active = 1'
-  ).get(organizationId).count;
+const collectOrgMetrics = async (organizationId) => {
+  const activeUsers = await User.count({ where: { organization_id: organizationId, is_active: true } });
+  const projects = await Project.count({ where: { organization_id: organizationId } });
 
-  const projects = db.prepare(
-    'SELECT COUNT(*) as count FROM projects WHERE organization_id = ?'
-  ).get(organizationId).count;
+  const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  const deployments = await Deployment.count({
+    where: {
+      organization_id: organizationId,
+      created_at: { [Op.gte]: yesterday }
+    }
+  });
 
-  const deployments = db.prepare(`
-    SELECT COUNT(*) as count
-    FROM deployments d
-    JOIN projects p ON p.id = d.project_id
-    WHERE p.organization_id = ? AND datetime(d.created_at) >= datetime('now', '-1 day')
-  `).get(organizationId).count;
+  const integrationsWithSecrets = await IntegrationSecret.findAll({ attributes: ['integration_id'] });
+  const integrationIds = integrationsWithSecrets.map((row) => row.integration_id);
+  const activeWithSecrets = integrationIds.length === 0
+    ? 0
+    : await Integration.count({
+        where: {
+          organization_id: organizationId,
+          is_active: true,
+          id: { [Op.in]: integrationIds }
+        }
+      });
 
-  const activeIntegrations = db.prepare(
-    `SELECT COUNT(*) as count
-     FROM integrations i
-     LEFT JOIN integration_secrets s ON s.integration_id = i.id
-     WHERE i.organization_id = ? AND i.is_active = 1 AND s.id IS NOT NULL`
-  ).get(organizationId).count;
+  const pendingInvites = await OrganizationInvite.count({
+    where: {
+      organization_id: organizationId,
+      status: 'pending',
+      [Op.or]: [{ expires_at: null }, { expires_at: { [Op.gt]: new Date() } }]
+    }
+  });
 
-  const pendingInvites = db.prepare(`
-    SELECT COUNT(*) as count
-    FROM organization_invites
-    WHERE organization_id = ? AND status = 'pending' AND (expires_at IS NULL OR datetime(expires_at) > datetime('now'))
-  `).get(organizationId).count;
-
-  insertMetric(organizationId, 'active_users', activeUsers, 'users');
-  insertMetric(organizationId, 'projects', projects, 'projects');
-  insertMetric(organizationId, 'deployments_24h', deployments, 'deployments');
-  insertMetric(organizationId, 'active_integrations', activeIntegrations, 'connections');
-  insertMetric(organizationId, 'pending_invites', pendingInvites, 'invites');
+  await insertMetric(organizationId, 'active_users', activeUsers, 'users');
+  await insertMetric(organizationId, 'projects', projects, 'projects');
+  await insertMetric(organizationId, 'deployments_24h', deployments, 'deployments');
+  await insertMetric(organizationId, 'active_integrations', activeWithSecrets, 'connections');
+  await insertMetric(organizationId, 'pending_invites', pendingInvites, 'invites');
 };
 
-export const runUsageMetricsJob = () => {
-  const organizations = db.prepare('SELECT id FROM organizations').all();
-  organizations.forEach((org) => {
+export const runUsageMetricsJob = async () => {
+  const organizations = await Organization.findAll({ attributes: ['id'] });
+  for (const org of organizations) {
     try {
-      collectOrgMetrics(org.id);
+      await collectOrgMetrics(org.id);
     } catch (error) {
       console.error('Usage metrics job error:', error);
     }
-  });
+  }
 };
 
 export const startUsageMetricsJob = () => {

@@ -1,47 +1,22 @@
 import express from 'express';
 import { EC2Client, DescribeInstancesCommand, RunInstancesCommand } from '@aws-sdk/client-ec2';
 import { RDSClient, DescribeDBInstancesCommand } from '@aws-sdk/client-rds';
-import { db } from '../database/init.js';
-import { logAuditAction } from '../utils/audit.js';
-import { decryptPayload } from '../utils/encryption.js';
+import { Project } from '../models/index.js';
+import { getIntegrationRecord } from '../utils/integrations.js';
+import { requireOpsAccess } from '../middleware/auth.js';
+import { requireOpsEnabled } from '../middleware/ops.js';
 
 const router = express.Router();
+router.use(requireOpsAccess('aidevops'), requireOpsEnabled('aidevops'));
 
-const parseConfig = (value) => {
-  if (!value) {
-    return {};
-  }
-  try {
-    return JSON.parse(value);
-  } catch (error) {
-    return {};
-  }
-};
-
-const loadAwsIntegration = (organizationId) => {
-  const row = db.prepare(`
-    SELECT i.configuration, s.encrypted_payload
-    FROM integrations i
-    JOIN integration_secrets s ON s.integration_id = i.id
-    WHERE i.organization_id = ? AND i.type = 'aws' AND i.is_active = 1
-    LIMIT 1
-  `).get(organizationId);
-
-  if (!row) {
+const loadAwsIntegration = async (organizationId) => {
+  const integration = await getIntegrationRecord(organizationId, 'aws');
+  if (!integration?.credentials) {
     return null;
   }
 
-  const configuration = parseConfig(row.configuration);
-  const metadata = configuration.metadata || {};
-  let credentials;
-
-  try {
-    const payload = JSON.parse(row.encrypted_payload);
-    credentials = decryptPayload(payload);
-  } catch (error) {
-    console.error('Failed to decrypt AWS integration payload:', error);
-    return null;
-  }
+  const metadata = integration.configuration?.metadata || {};
+  const credentials = integration.credentials;
 
   if (!credentials?.access_key_id || !credentials?.secret_access_key) {
     return null;
@@ -74,7 +49,7 @@ const buildAwsClients = (awsConfig) => {
 router.get('/overview', async (req, res) => {
   try {
     const organizationId = req.user.organization_id;
-    const awsIntegration = loadAwsIntegration(organizationId);
+    const awsIntegration = await loadAwsIntegration(organizationId);
 
     if (!awsIntegration) {
       const demoOverview = {
@@ -120,9 +95,16 @@ router.get('/overview', async (req, res) => {
 // Get detailed infrastructure resources
 router.get('/resources', async (req, res) => {
   try {
-    const userId = req.user.id;
+    const organizationId = req.user.organization_id;
 
-    // Generate realistic infrastructure resources
+    // Only surface resources when a cloud integration is connected; otherwise
+    // return an honest empty state instead of fabricated data.
+    const awsIntegration = await loadAwsIntegration(organizationId);
+    if (!awsIntegration) {
+      return res.json({ requires_integration: true, data_source: 'demo', resources: [] });
+    }
+
+    // Placeholder resource snapshot for a connected account.
     const resourceTypes = [
       { type: 'ec2', name: 'EC2 Instance', provider: 'aws' },
       { type: 'rds', name: 'RDS Database', provider: 'aws' },
@@ -166,8 +148,8 @@ router.get('/resources', async (req, res) => {
       
       resources.push(resource);
     }
-    
-    res.json(resources);
+
+    res.json({ requires_integration: false, data_source: 'aws', resources });
   } catch (error) {
     console.error('Resources fetch error:', error);
     res.status(500).json({ error: 'Failed to fetch resources' });
@@ -181,8 +163,7 @@ router.post('/provision', async (req, res) => {
     const organizationId = req.user.organization_id;
 
     // Validate project ownership (org scoped)
-    const project = db.prepare('SELECT * FROM projects WHERE id = ? AND organization_id = ?')
-      .get(projectId, organizationId);
+    const project = await Project.findOne({ where: { id: projectId, organization_id: organizationId }, raw: true });
     if (!project) {
       return res.status(404).json({ error: 'Project not found' });
     }
@@ -211,9 +192,22 @@ router.post('/provision', async (req, res) => {
 // Get cost analysis
 router.get('/costs', async (req, res) => {
   try {
-    const userId = req.user.id;
+    const organizationId = req.user.organization_id;
 
-    // Generate realistic cost data for the last 6 months
+    // Only surface cost analytics when a cloud integration is connected.
+    const awsIntegration = await loadAwsIntegration(organizationId);
+    if (!awsIntegration) {
+      return res.json({
+        requires_integration: true,
+        data_source: 'demo',
+        costData: [],
+        recommendations: [],
+        totalSpent: 0,
+        averageMonthly: 0
+      });
+    }
+
+    // Placeholder cost analytics for a connected account (last 6 months).
     const costData = [];
     const now = new Date();
     
@@ -261,6 +255,8 @@ router.get('/costs', async (req, res) => {
     ];
     
     res.json({
+      requires_integration: false,
+      data_source: 'aws',
       costData,
       recommendations,
       totalSpent: costData.reduce((sum, month) => sum + month.total, 0),

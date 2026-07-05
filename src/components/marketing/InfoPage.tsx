@@ -1,20 +1,20 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { ArrowRight, Sparkles } from 'lucide-react';
+import { ArrowRight } from 'lucide-react';
 import Header from '../Header';
 import Footer from '../Footer';
 
 type InfoSection = {
   title: string;
   body: string;
-  bullets?: string[];
+  bullets?: readonly string[];
 };
 
 type PricingTier = {
   name: string;
   price: string;
   description: string;
-  features: string[];
+  features: readonly string[];
   ctaLabel?: string;
 };
 
@@ -26,10 +26,12 @@ type FaqItem = {
 type InfoPageProps = {
   title: string;
   subtitle: string;
-  highlights?: string[];
-  sections?: InfoSection[];
-  pricingTiers?: PricingTier[];
-  faq?: FaqItem[];
+  highlights?: readonly string[];
+  sections?: readonly InfoSection[];
+  pricingTiers?: readonly PricingTier[];
+  faq?: readonly FaqItem[];
+  pricingTitle?: string;
+  faqTitle?: string;
   ctaLabel?: string;
   ctaTo?: string;
   secondaryCtaLabel?: string;
@@ -37,13 +39,11 @@ type InfoPageProps = {
   contactEmail?: string;
   contactSubject?: string;
   contactCtaLabel?: string;
+  contactTitle?: string;
+  contactSubtitle?: string;
 };
 
-const defaultHighlights = [
-  'Unified control for pipelines and infrastructure',
-  'AI-guided workflows that stay audit-ready',
-  'Global-ready resilience with calm operations'
-];
+const defaultHighlights: readonly string[] = [];
 
 const InfoPage: React.FC<InfoPageProps> = ({
   title,
@@ -52,13 +52,17 @@ const InfoPage: React.FC<InfoPageProps> = ({
   sections = [],
   pricingTiers,
   faq,
+  pricingTitle,
+  faqTitle,
   ctaLabel = 'Start with Aikya',
   ctaTo = '/login',
   secondaryCtaLabel = 'Back to home',
   secondaryCtaTo = '/',
   contactEmail,
   contactSubject = 'Aikya inquiry',
-  contactCtaLabel = 'Email Aikya'
+  contactCtaLabel = 'Email Aikya',
+  contactTitle,
+  contactSubtitle
 }) => {
   const renderCta = (to: string, label: string, className: string) => {
     const isExternal = to.startsWith('http') || to.startsWith('mailto:');
@@ -88,28 +92,25 @@ const InfoPage: React.FC<InfoPageProps> = ({
       <Header />
       <main className="pt-32 pb-20 px-6">
         <div className="container mx-auto">
-          <div className="max-w-3xl">
-            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white/10 border border-white/10 text-sm text-amber-200">
-              <Sparkles className="h-4 w-4 text-amber-300" />
-              Aikya Platform
+          <div className="grid gap-10 lg:grid-cols-[1.1fr_0.9fr] lg:items-end">
+            <div>
+              <h1 className="text-4xl md:text-6xl font-display text-white">{title}</h1>
+              <p className="text-lg md:text-xl text-slate-300 mt-4">{subtitle}</p>
             </div>
-            <h1 className="text-4xl md:text-6xl font-display text-white mt-6">{title}</h1>
-            <p className="text-lg md:text-xl text-slate-300 mt-4">{subtitle}</p>
+            {highlights.length > 0 && (
+              <div className="grid gap-4 sm:grid-cols-2">
+                {highlights.map((item, index) => (
+                  <div key={index} className="glass rounded-2xl p-6">
+                    <p className="text-slate-200">{item}</p>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
-
-          {highlights.length > 0 && (
-            <div className="mt-10 grid gap-4 md:grid-cols-3">
-              {highlights.map((item, index) => (
-                <div key={index} className="glass rounded-2xl p-6">
-                  <p className="text-slate-200">{item}</p>
-                </div>
-              ))}
-            </div>
-          )}
 
           {pricingTiers && pricingTiers.length > 0 && (
             <section className="mt-16">
-              <h2 className="text-2xl font-display text-white mb-6">Plans</h2>
+              <h2 className="text-2xl font-display text-white mb-6">{pricingTitle || 'Plans'}</h2>
               <div className="grid gap-6 lg:grid-cols-3">
                 {pricingTiers.map((tier) => (
                   <div key={tier.name} className="glass rounded-2xl p-6 flex flex-col">
@@ -155,7 +156,7 @@ const InfoPage: React.FC<InfoPageProps> = ({
 
           {faq && faq.length > 0 && (
             <section className="mt-16">
-              <h2 className="text-2xl font-display text-white mb-6">FAQ</h2>
+              <h2 className="text-2xl font-display text-white mb-6">{faqTitle || 'FAQ'}</h2>
               <div className="grid gap-4 md:grid-cols-2">
                 {faq.map((item) => (
                   <div key={item.question} className="glass rounded-2xl p-6">
@@ -170,9 +171,9 @@ const InfoPage: React.FC<InfoPageProps> = ({
           {contactEmail && (
             <section className="mt-16 glass rounded-2xl p-8 flex flex-col md:flex-row md:items-center md:justify-between gap-6">
               <div>
-                <h3 className="text-2xl font-display text-white">Talk to the Aikya team</h3>
+                <h3 className="text-2xl font-display text-white">{contactTitle || 'Talk to the Aikya team'}</h3>
                 <p className="text-slate-300 mt-2">
-                  Send us a message and we will respond within one business day.
+                  {contactSubtitle || 'Send us a message and we will respond within one business day.'}
                 </p>
                 <p className="text-slate-400 mt-2">Email: {contactEmail}</p>
               </div>

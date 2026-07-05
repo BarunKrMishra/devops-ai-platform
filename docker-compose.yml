@@ -1,4 +1,17 @@
 services:
+  db:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-aikya}
+      MYSQL_USER: ${MYSQL_USER:-aikya}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-aikya}
+    ports:
+      - "3306:3306"
+    volumes:
+      - aikya_mysql:/var/lib/mysql
+
   api:
     build:
       context: .
@@ -7,7 +20,13 @@ services:
     environment:
       NODE_ENV: production
       PORT: 3001
-      DATABASE_PATH: /data/devops_ai.db
+      MYSQL_URL: ${MYSQL_URL:-}
+      MYSQL_HOST: ${MYSQL_HOST:-db}
+      MYSQL_PORT: ${MYSQL_PORT:-3306}
+      MYSQL_USER: ${MYSQL_USER:-aikya}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-aikya}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-aikya}
+      MYSQL_SSL: ${MYSQL_SSL:-false}
       JWT_SECRET: ${JWT_SECRET}
       INTEGRATION_MASTER_KEY: ${INTEGRATION_MASTER_KEY}
       APP_BASE_URL: ${APP_BASE_URL:-http://localhost:8080}
@@ -20,10 +39,10 @@ services:
       GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET}
       INTEGRATION_GITHUB_CLIENT_ID: ${INTEGRATION_GITHUB_CLIENT_ID}
       INTEGRATION_GITHUB_CLIENT_SECRET: ${INTEGRATION_GITHUB_CLIENT_SECRET}
-    volumes:
-      - aikya_data:/data
     expose:
       - "3001"
+    depends_on:
+      - db
 
   web:
     build:
@@ -39,4 +58,4 @@ services:
       - api
 
 volumes:
-  aikya_data:
+  aikya_mysql:

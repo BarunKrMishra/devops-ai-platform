@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Menu, X, Home, LayoutDashboard, GitBranch, Cloud, Activity, FileText, Settings, LogOut, LayoutTemplate, Users, TrendingUp, PlugZap } from 'lucide-react';
+import { Menu, X, Home, LayoutDashboard, GitBranch, FileText, Settings, LogOut, LayoutTemplate, Users, TrendingUp, PlugZap, Layers } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import AikyaLogo from './brand/AikyaLogo';
 
@@ -13,9 +13,8 @@ const Header: React.FC = () => {
   const navigationItems = [
     { path: '/', label: 'Home', icon: Home },
     { path: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-    { path: '/cicd', label: 'CI/CD', icon: GitBranch },
-    { path: '/infrastructure', label: 'Infrastructure', icon: Cloud },
-    { path: '/monitoring', label: 'Monitoring', icon: Activity },
+    { path: '/ops/aidevops', label: 'AI DevOps', icon: GitBranch },
+    { path: '/ops', label: 'Ops Hub', icon: Layers },
     { path: '/app/integrations', label: 'Integrations', icon: PlugZap },
     { path: '/templates', label: 'Templates', icon: LayoutTemplate },
     { path: '/collaboration', label: 'Team', icon: Users },

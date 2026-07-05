@@ -1,9 +1,10 @@
 import express from 'express';
-import { db } from '../database/init.js';
+import crypto from 'crypto';
+import { Op, fn, col } from 'sequelize';
+import { Organization, User, OrganizationInvite, Team, OpsModule, UsageMetric, Project } from '../models/index.js';
 import { requireRole } from '../middleware/auth.js';
 import { logAuditAction } from '../utils/audit.js';
 import { createEmailTransport } from '../utils/email.js';
-import crypto from 'crypto';
 
 const router = express.Router();
 const APP_BASE_URL = process.env.APP_BASE_URL || 'http://localhost:5173';
@@ -33,7 +34,11 @@ const sendInviteEmail = async ({ to, organizationName, inviteLink }) => {
     from: emailFrom,
     to,
     subject: `You're invited to join ${organizationName} on Aikya`,
-    text: `You've been invited to join ${organizationName} on Aikya.\n\nAccept the invite: ${inviteLink}\n\nThis link expires in ${INVITE_EXPIRES_DAYS} days.`,
+    text: `You've been invited to join ${organizationName} on Aikya.
+
+Accept the invite: ${inviteLink}
+
+This link expires in ${INVITE_EXPIRES_DAYS} days.`,
     html: `
       <p>You've been invited to join <strong>${organizationName}</strong> on Aikya.</p>
       <p><a href="${inviteLink}">Accept the invite</a></p>
@@ -63,22 +68,29 @@ router.get('/', async (req, res) => {
   try {
     const organizationId = req.user.organization_id;
 
-    const organization = db.prepare(`
-      SELECT o.*,
-        (SELECT COUNT(*) FROM users u WHERE u.organization_id = o.id AND u.is_active = 1) as member_count,
-        (SELECT COUNT(*) FROM projects p WHERE p.organization_id = o.id) as project_count,
-        (SELECT COUNT(*) FROM organization_invites i WHERE i.organization_id = o.id AND i.status = 'pending' AND (i.expires_at IS NULL OR datetime(i.expires_at) > datetime('now'))) as pending_invites
-      FROM organizations o
-      WHERE o.id = ?
-    `).get(organizationId);
-
+    const organization = await Organization.findByPk(organizationId, { raw: true });
     if (!organization) {
       return res.status(404).json({ error: 'Organization not found' });
     }
 
+    const [memberCount, projectCount, pendingInvites] = await Promise.all([
+      User.count({ where: { organization_id: organizationId, is_active: true } }),
+      Project.count({ where: { organization_id: organizationId } }),
+      OrganizationInvite.count({
+        where: {
+          organization_id: organizationId,
+          status: 'pending',
+          [Op.or]: [{ expires_at: null }, { expires_at: { [Op.gt]: new Date() } }]
+        }
+      })
+    ]);
+
     res.json({
       ...organization,
-      settings: JSON.parse(organization.settings)
+      member_count: memberCount,
+      project_count: projectCount,
+      pending_invites: pendingInvites,
+      settings: organization.settings || {}
     });
   } catch (error) {
     console.error('Organization fetch error:', error);
@@ -93,11 +105,10 @@ router.put('/settings', requireRole(['admin']), async (req, res) => {
     const userId = req.user.id;
     const { name, billing_email, settings } = req.body;
 
-    db.prepare(`
-      UPDATE organizations 
-      SET name = ?, billing_email = ?, settings = ?, updated_at = CURRENT_TIMESTAMP
-      WHERE id = ?
-    `).run(name, billing_email, JSON.stringify(settings), organizationId);
+    await Organization.update(
+      { name, billing_email, settings },
+      { where: { id: organizationId } }
+    );
 
     await logAuditAction(userId, 'UPDATE_ORGANIZATION', 'organization', organizationId, {
       name,
@@ -116,17 +127,79 @@ router.get('/members', async (req, res) => {
   try {
     const organizationId = req.user.organization_id;
 
-    const members = db.prepare(`
-      SELECT id, email, name, role, last_login, is_active, created_at
-      FROM users 
-      WHERE organization_id = ?
-      ORDER BY role, name
-    `).all(organizationId);
+    const members = await User.findAll({
+      where: { organization_id: organizationId },
+      order: [['role', 'ASC'], ['name', 'ASC']],
+      raw: true
+    });
 
-    res.json(members);
+    const response = members.map((member) => ({
+      ...member,
+      permissions: member.permissions || {}
+    }));
+
+    res.json(response);
   } catch (error) {
     console.error('Members fetch error:', error);
     res.status(500).json({ error: 'Failed to fetch members' });
+  }
+});
+
+// Update member permissions
+router.put('/members/:memberId/permissions', requireRole(['admin', 'manager']), async (req, res) => {
+  try {
+    const organizationId = req.user.organization_id;
+    const userId = req.user.id;
+    const { memberId } = req.params;
+    const { ops_access } = req.body || {};
+
+    const member = await User.findOne({ where: { id: memberId, organization_id: organizationId }, raw: true });
+    if (!member) {
+      return res.status(404).json({ error: 'Member not found.' });
+    }
+
+    if (Number(memberId) === Number(userId)) {
+      return res.status(400).json({ error: 'You cannot change your own permissions.' });
+    }
+
+    if (ops_access !== null && !Array.isArray(ops_access)) {
+      return res.status(400).json({ error: 'ops_access must be an array or null.' });
+    }
+
+    let normalizedOps = null;
+    if (Array.isArray(ops_access)) {
+      normalizedOps = ops_access.map((item) => String(item)).filter(Boolean);
+      const rows = await OpsModule.findAll({ attributes: ['key'], raw: true });
+      const allowedKeys = rows.map((row) => row.key);
+      const invalid = normalizedOps.filter((key) => !allowedKeys.includes(key));
+      if (invalid.length > 0) {
+        return res.status(400).json({ error: `Invalid ops module keys: ${invalid.join(', ')}` });
+      }
+    }
+
+    const existingPermissions = member.permissions || {};
+    if (normalizedOps === null) {
+      delete existingPermissions.ops_access;
+    } else {
+      existingPermissions.ops_access = normalizedOps;
+    }
+
+    await User.update(
+      { permissions: existingPermissions },
+      { where: { id: memberId } }
+    );
+
+    await logAuditAction(userId, 'UPDATE_MEMBER_PERMISSIONS', 'user', memberId, {
+      ops_access: normalizedOps
+    });
+
+    res.json({
+      message: 'Permissions updated.',
+      permissions: existingPermissions
+    });
+  } catch (error) {
+    console.error('Member permissions update error:', error);
+    res.status(500).json({ error: 'Failed to update permissions' });
   }
 });
 
@@ -141,11 +214,10 @@ router.put('/seat-limit', requireRole(['admin', 'manager']), async (req, res) =>
       return res.status(400).json({ error: 'Seat limit must be a positive number.' });
     }
 
-    db.prepare(`
-      UPDATE organizations 
-      SET seat_limit = ?, updated_at = CURRENT_TIMESTAMP
-      WHERE id = ?
-    `).run(Number(seat_limit), organizationId);
+    await Organization.update(
+      { seat_limit: Number(seat_limit) },
+      { where: { id: organizationId } }
+    );
 
     await logAuditAction(userId, 'UPDATE_SEAT_LIMIT', 'organization', organizationId, {
       seat_limit: Number(seat_limit)
@@ -178,21 +250,25 @@ router.post('/invites', requireRole(['admin', 'manager']), async (req, res) => {
       return res.status(400).json({ error: 'Invalid role' });
     }
 
-    const organization = db.prepare('SELECT seat_limit FROM organizations WHERE id = ?').get(organizationId);
-    const memberCount = db.prepare('SELECT COUNT(*) as count FROM users WHERE organization_id = ? AND is_active = 1').get(organizationId).count;
-    const pendingInvites = db.prepare(`
-      SELECT COUNT(*) as count 
-      FROM organization_invites 
-      WHERE organization_id = ? AND status = 'pending' AND (expires_at IS NULL OR datetime(expires_at) > datetime('now'))
-    `).get(organizationId).count;
+    const organization = await Organization.findByPk(organizationId, { raw: true });
+    const [memberCount, pendingInvites] = await Promise.all([
+      User.count({ where: { organization_id: organizationId, is_active: true } }),
+      OrganizationInvite.count({
+        where: {
+          organization_id: organizationId,
+          status: 'pending',
+          [Op.or]: [{ expires_at: null }, { expires_at: { [Op.gt]: new Date() } }]
+        }
+      })
+    ]);
 
     if (organization?.seat_limit && memberCount + pendingInvites >= organization.seat_limit) {
       return res.status(400).json({ error: 'Seat limit reached. Please increase your seat limit to invite more users.' });
     }
 
-    const existingUser = db.prepare('SELECT id, organization_id, is_active FROM users WHERE email = ?').get(email);
+    const existingUser = await User.findOne({ where: { email }, raw: true });
     if (existingUser) {
-      if (existingUser.organization_id !== organizationId) {
+      if (Number(existingUser.organization_id) !== Number(organizationId)) {
         return res.status(400).json({ error: 'User belongs to another organization.' });
       }
       if (existingUser.is_active) {
@@ -200,34 +276,56 @@ router.post('/invites', requireRole(['admin', 'manager']), async (req, res) => {
       }
     }
 
-    const normalizedTeamIds = Array.isArray(team_ids) ? team_ids.map(Number).filter(Boolean) : [];
+    const normalizedTeamIds = Array.isArray(team_ids)
+      ? team_ids.map((id) => Number(id)).filter(Boolean)
+      : [];
+
     if (normalizedTeamIds.length > 0) {
-      const rows = db.prepare(`
-        SELECT id FROM teams WHERE organization_id = ? AND id IN (${normalizedTeamIds.map(() => '?').join(',')})
-      `).all(organizationId, ...normalizedTeamIds);
-      if (rows.length !== normalizedTeamIds.length) {
+      const validTeams = await Team.count({
+        where: {
+          organization_id: organizationId,
+          id: { [Op.in]: normalizedTeamIds }
+        }
+      });
+      if (validTeams !== normalizedTeamIds.length) {
         return res.status(400).json({ error: 'One or more selected teams are invalid.' });
       }
     }
 
     const inviteToken = crypto.randomBytes(32).toString('hex');
-    const expiresAt = new Date(Date.now() + INVITE_EXPIRES_DAYS * 24 * 60 * 60 * 1000).toISOString();
+    const expiresAt = new Date(Date.now() + INVITE_EXPIRES_DAYS * 24 * 60 * 60 * 1000);
 
-    const existingInvite = db.prepare('SELECT id FROM organization_invites WHERE organization_id = ? AND email = ?').get(organizationId, email);
+    const existingInvite = await OrganizationInvite.findOne({
+      where: { organization_id: organizationId, email }
+    });
+
     if (existingInvite) {
-      db.prepare(`
-        UPDATE organization_invites
-        SET role = ?, team_ids = ?, token = ?, status = 'pending', invited_by = ?, expires_at = ?, accepted_at = NULL, created_at = CURRENT_TIMESTAMP
-        WHERE id = ?
-      `).run(role, JSON.stringify(normalizedTeamIds), inviteToken, userId, expiresAt, existingInvite.id);
+      await OrganizationInvite.update(
+        {
+          role,
+          team_ids: normalizedTeamIds,
+          token: inviteToken,
+          status: 'pending',
+          invited_by: userId,
+          expires_at: expiresAt,
+          accepted_at: null
+        },
+        { where: { id: existingInvite.id } }
+      );
     } else {
-      db.prepare(`
-        INSERT INTO organization_invites (organization_id, email, role, team_ids, token, status, invited_by, expires_at)
-        VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)
-      `).run(organizationId, email, role, JSON.stringify(normalizedTeamIds), inviteToken, userId, expiresAt);
+      await OrganizationInvite.create({
+        organization_id: organizationId,
+        email,
+        role,
+        team_ids: normalizedTeamIds,
+        token: inviteToken,
+        status: 'pending',
+        invited_by: userId,
+        expires_at: expiresAt
+      });
     }
 
-    const organizationName = db.prepare('SELECT name FROM organizations WHERE id = ?').get(organizationId)?.name || 'your organization';
+    const organizationName = organization?.name || 'your organization';
     const inviteLink = `${APP_BASE_URL}/accept-invite?token=${inviteToken}`;
 
     let emailSent = true;
@@ -270,12 +368,7 @@ router.put('/members/:memberId/role', requireRole(['admin', 'manager']), async (
       return res.status(400).json({ error: 'Invalid role' });
     }
 
-    // Verify member belongs to organization
-    const member = db.prepare(`
-      SELECT id, email FROM users 
-      WHERE id = ? AND organization_id = ?
-    `).get(memberId, organizationId);
-
+    const member = await User.findOne({ where: { id: memberId, organization_id: organizationId }, raw: true });
     if (!member) {
       return res.status(404).json({ error: 'Member not found' });
     }
@@ -284,7 +377,7 @@ router.put('/members/:memberId/role', requireRole(['admin', 'manager']), async (
       return res.status(400).json({ error: 'You cannot change your own role.' });
     }
 
-    db.prepare('UPDATE users SET role = ? WHERE id = ?').run(role, memberId);
+    await User.update({ role }, { where: { id: memberId } });
 
     await logAuditAction(userId, 'UPDATE_USER_ROLE', 'user', memberId, {
       email: member.email,
@@ -305,12 +398,7 @@ router.delete('/members/:memberId', requireRole(['admin', 'manager']), async (re
     const organizationId = req.user.organization_id;
     const userId = req.user.id;
 
-    // Verify member belongs to organization
-    const member = db.prepare(`
-      SELECT id, email FROM users 
-      WHERE id = ? AND organization_id = ?
-    `).get(memberId, organizationId);
-
+    const member = await User.findOne({ where: { id: memberId, organization_id: organizationId }, raw: true });
     if (!member) {
       return res.status(404).json({ error: 'Member not found' });
     }
@@ -319,8 +407,7 @@ router.delete('/members/:memberId', requireRole(['admin', 'manager']), async (re
       return res.status(400).json({ error: 'You cannot remove yourself.' });
     }
 
-    // Deactivate user instead of deleting
-    db.prepare('UPDATE users SET is_active = 0 WHERE id = ?').run(memberId);
+    await User.update({ is_active: false }, { where: { id: memberId } });
 
     await logAuditAction(userId, 'REMOVE_USER', 'user', memberId, {
       email: member.email
@@ -339,32 +426,28 @@ router.get('/usage', async (req, res) => {
     const organizationId = req.user.organization_id;
     const { period = '30d' } = req.query;
 
-    let dateFilter = '';
-    switch (period) {
-      case '24h':
-        dateFilter = "datetime(recorded_at) >= datetime('now', '-1 day')";
-        break;
-      case '7d':
-        dateFilter = "datetime(recorded_at) >= datetime('now', '-7 days')";
-        break;
-      case '30d':
-        dateFilter = "datetime(recorded_at) >= datetime('now', '-30 days')";
-        break;
-      default:
-        dateFilter = "datetime(recorded_at) >= datetime('now', '-30 days')";
+    let startDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    if (period === '24h') {
+      startDate = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    } else if (period === '7d') {
+      startDate = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
     }
 
-    const usage = db.prepare(`
-      SELECT 
-        metric_type,
-        SUM(value) as total_value,
-        unit,
-        COUNT(*) as data_points
-      FROM usage_metrics 
-      WHERE organization_id = ? AND ${dateFilter}
-      GROUP BY metric_type, unit
-      ORDER BY total_value DESC
-    `).all(organizationId);
+    const usage = await UsageMetric.findAll({
+      where: {
+        organization_id: organizationId,
+        recorded_at: { [Op.gte]: startDate }
+      },
+      attributes: [
+        'metric_type',
+        'unit',
+        [fn('SUM', col('value')), 'total_value'],
+        [fn('COUNT', col('id')), 'data_points']
+      ],
+      group: ['metric_type', 'unit'],
+      order: [[fn('SUM', col('value')), 'DESC']],
+      raw: true
+    });
 
     res.json(usage);
   } catch (error) {

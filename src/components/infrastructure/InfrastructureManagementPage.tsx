@@ -7,9 +7,18 @@ import SkeletonBlock from '../ui/SkeletonBlock';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
+interface InfraOverview {
+  requires_integration?: boolean;
+  data_source?: string;
+  region?: string;
+  totalInstances?: number;
+  totalDatabases?: number;
+  monthlyCost?: number;
+}
+
 const InfrastructureManagementPage: React.FC = () => {
   const { onboarding, token } = useAuth();
-  const [overview, setOverview] = useState<any>({});
+  const [overview, setOverview] = useState<InfraOverview>({});
   const [loading, setLoading] = useState(true);
   const [selectedProject, setSelectedProject] = useState<number | null>(null);
   const [requiresIntegration, setRequiresIntegration] = useState(false);
@@ -64,7 +73,7 @@ const InfrastructureManagementPage: React.FC = () => {
     }
   };
 
-  const handleProvisionResource = async (resourceType: string, configuration: any) => {
+  const handleProvisionResource = async (resourceType: string, configuration: Record<string, unknown>) => {
     if (!selectedProject) {
       setLoadError('Select a project before provisioning resources.');
       return;

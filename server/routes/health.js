@@ -1,5 +1,5 @@
 import express from 'express';
-import { db } from '../database/init.js';
+import { sequelize } from '../database/sequelize.js';
 import os from 'os';
 
 const router = express.Router();
@@ -7,8 +7,9 @@ const router = express.Router();
 // Health check endpoint
 router.get('/', async (req, res) => {
   try {
-    // Check database connection
-    const dbCheck = db.prepare('SELECT 1').get();
+    const dbCheck = await sequelize.authenticate()
+      .then(() => true)
+      .catch(() => false);
 
     // System health metrics
     const health = {
@@ -65,8 +66,8 @@ router.get('/metrics', async (req, res) => {
         }
       },
       database: {
-        connected: !!db.prepare('SELECT 1').get(),
-        path: process.env.DATABASE_PATH
+        connected: await sequelize.authenticate().then(() => true).catch(() => false),
+        host: process.env.MYSQL_HOST || 'via MYSQL_URL'
       }
     };
 

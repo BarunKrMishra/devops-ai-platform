@@ -2,6 +2,7 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import axios from 'axios';
+import { getApiErrorMessage } from '../../utils/apiError';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
@@ -52,8 +53,8 @@ const AcceptInvitePage: React.FC = () => {
         password: form.password
       });
       setSuccess('Invite accepted. You can now sign in.');
-    } catch (err: any) {
-      setError(err.response?.data?.error || 'Failed to accept invite.');
+    } catch (err) {
+      setError(getApiErrorMessage(err, 'Failed to accept invite.'));
     }
   };
 

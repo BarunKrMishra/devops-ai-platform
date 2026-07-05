@@ -43,3 +43,14 @@ coverage/
 *.tmp
 *.temp
 .cache/
+scratch_*
+
+# Redundant duplicate project copy (source lives at repo root)
+devops-ai-platform-main/
+
+# Archives / extracted docs (keep out of the app repo)
+*.zip
+_pdf_text/
+
+# Claude Code local settings (per-machine harness config, not project code)
+.claude/

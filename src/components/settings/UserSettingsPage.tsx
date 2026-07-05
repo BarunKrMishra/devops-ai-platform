@@ -14,6 +14,7 @@ import {
   Copy
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
+import { getApiErrorMessage } from '../../utils/apiError';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
@@ -128,8 +129,8 @@ const UserSettingsPage: React.FC = () => {
         email: updated.email || prev.email
       }));
       setStatusMessage('Profile updated successfully.');
-    } catch (error: any) {
-      setErrorMessage(error.response?.data?.error || 'Failed to update profile.');
+    } catch (error) {
+      setErrorMessage(getApiErrorMessage(error, 'Failed to update profile.'));
     } finally {
       setSavingProfile(false);
     }
@@ -150,8 +151,8 @@ const UserSettingsPage: React.FC = () => {
         { headers: { Authorization: `Bearer ${token}` } }
       );
       setStatusMessage('Notification preferences saved.');
-    } catch (error: any) {
-      setErrorMessage(error.response?.data?.error || 'Failed to save notifications.');
+    } catch (error) {
+      setErrorMessage(getApiErrorMessage(error, 'Failed to save notifications.'));
     } finally {
       setSavingNotifications(false);
     }
@@ -179,8 +180,8 @@ const UserSettingsPage: React.FC = () => {
       setDemoMode(nextValue);
       await refreshOnboarding();
       setStatusMessage('Experience settings updated.');
-    } catch (error: any) {
-      setDemoError(error.response?.data?.error || 'Failed to update demo mode.');
+    } catch (error) {
+      setDemoError(getApiErrorMessage(error, 'Failed to update demo mode.'));
     } finally {
       setDemoSaving(false);
     }
@@ -214,8 +215,8 @@ const UserSettingsPage: React.FC = () => {
       setShowPasswordModal(false);
       setPasswordForm({ current: '', next: '', confirm: '' });
       setStatusMessage('Password updated successfully.');
-    } catch (error: any) {
-      setPasswordError(error.response?.data?.error || 'Failed to change password.');
+    } catch (error) {
+      setPasswordError(getApiErrorMessage(error, 'Failed to change password.'));
     } finally {
       setPasswordSaving(false);
     }
@@ -235,8 +236,8 @@ const UserSettingsPage: React.FC = () => {
         email: profile.email
       });
       setTwoFactorData({ qr: response.data.qr, secret: response.data.secret });
-    } catch (error: any) {
-      setTwoFactorError(error.response?.data?.error || 'Failed to start 2FA setup.');
+    } catch (error) {
+      setTwoFactorError(getApiErrorMessage(error, 'Failed to start 2FA setup.'));
     } finally {
       setTwoFactorLoading(false);
     }
@@ -254,8 +255,8 @@ const UserSettingsPage: React.FC = () => {
       });
       setTwoFactorStatus('Two-factor authentication enabled.');
       setTwoFactorToken('');
-    } catch (error: any) {
-      setTwoFactorError(error.response?.data?.error || 'Failed to verify 2FA code.');
+    } catch (error) {
+      setTwoFactorError(getApiErrorMessage(error, 'Failed to verify 2FA code.'));
     }
   };
 
@@ -270,8 +271,8 @@ const UserSettingsPage: React.FC = () => {
         headers: { Authorization: `Bearer ${token}` }
       });
       setApiKeys(response.data || []);
-    } catch (error: any) {
-      setApiKeyError(error.response?.data?.error || 'Failed to load API keys.');
+    } catch (error) {
+      setApiKeyError(getApiErrorMessage(error, 'Failed to load API keys.'));
     }
   };
 
@@ -293,8 +294,8 @@ const UserSettingsPage: React.FC = () => {
         headers: { Authorization: `Bearer ${token}` }
       });
       setApiKeys(refreshed.data || []);
-    } catch (error: any) {
-      setApiKeyError(error.response?.data?.error || 'Failed to generate API key.');
+    } catch (error) {
+      setApiKeyError(getApiErrorMessage(error, 'Failed to generate API key.'));
     } finally {
       setApiKeyLoading(false);
     }
@@ -310,8 +311,8 @@ const UserSettingsPage: React.FC = () => {
       });
       setApiKeys((prev) => prev.map((key) => (key.id === id ? { ...key, is_active: false } : key)));
       setApiKeyStatus('API key revoked.');
-    } catch (error: any) {
-      setApiKeyError(error.response?.data?.error || 'Failed to revoke API key.');
+    } catch (error) {
+      setApiKeyError(getApiErrorMessage(error, 'Failed to revoke API key.'));
     }
   };
 

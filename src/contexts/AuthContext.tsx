@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import axios from 'axios';
+import { getApiErrorMessage } from '../utils/apiError';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
@@ -14,6 +15,7 @@ interface User {
     canManageProjects?: boolean;
     canManageTemplates?: boolean;
     canViewAnalytics?: boolean;
+    ops_access?: string[];
   };
 }
 
@@ -89,7 +91,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       (error) => {
         const status = error.response?.status;
         const url = error.config?.url || '';
-        if (status && [401, 403].includes(status) && !url.includes('/api/auth')) {
+        const errorMessage = getApiErrorMessage(error, '');
+        if ((status === 401 || (status === 403 && errorMessage === 'Invalid token')) && !url.includes('/api/auth')) {
           logout();
           window.location.href = '/login?expired=1';
         }
@@ -97,25 +100,32 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     );
 
+    let tokenExpired = false;
     if (token) {
       axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
       // Decode JWT to get user info (in production, verify with backend)
       try {
         const payload = JSON.parse(atob(token.split('.')[1]));
-        setUser({
-          id: payload.id,
-          email: payload.email,
-          role: payload.role,
-          organization_id: payload.organization_id,
-          name: payload.name,
-          permissions: payload.permissions
-        });
+        if (payload?.exp && Date.now() >= payload.exp * 1000) {
+          logout();
+          tokenExpired = true;
+        } else {
+          setUser({
+            id: payload.id,
+            email: payload.email,
+            role: payload.role,
+            organization_id: payload.organization_id,
+            name: payload.name,
+            permissions: payload.permissions
+          });
+        }
       } catch (error) {
         console.error('Invalid token:', error);
         logout();
+        tokenExpired = true;
       }
     }
-    if (token) {
+    if (token && !tokenExpired) {
       refreshOnboarding();
     }
     setLoading(false);
@@ -140,12 +150,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       localStorage.setItem('token', newToken);
       axios.defaults.headers.common['Authorization'] = `Bearer ${newToken}`;
       await refreshOnboarding(newToken);
-    } catch (error: any) {
-      const message = error?.message || '';
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '';
       if (!message.includes('OTP sent to email')) {
-        console.error('Frontend login error:', error, error.response?.data);
+        console.error('Frontend login error:', error);
       }
-      const responseMessage = error.response?.data?.error || 'Login failed';
+      const responseMessage = getApiErrorMessage(error, 'Login failed');
       throw new Error(message || responseMessage);
     }
   };
@@ -169,10 +179,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       localStorage.setItem('token', newToken);
       axios.defaults.headers.common['Authorization'] = `Bearer ${newToken}`;
       await refreshOnboarding(newToken);
-    } catch (error: any) {
-      const message = error?.message || '';
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '';
       if (!message.includes('OTP sent to email')) {
-        const responseMessage = error.response?.data?.error || 'Registration failed';
+        const responseMessage = getApiErrorMessage(error, 'Registration failed');
         throw new Error(responseMessage);
       }
       throw new Error(message);
@@ -192,8 +202,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       localStorage.setItem('token', newToken);
       axios.defaults.headers.common['Authorization'] = `Bearer ${newToken}`;
       await refreshOnboarding(newToken);
-    } catch (error: any) {
-      const message = error.response?.data?.error || 'GitHub authentication failed';
+    } catch (error) {
+      const message = getApiErrorMessage(error, 'GitHub authentication failed');
       throw new Error(message);
     }
   };

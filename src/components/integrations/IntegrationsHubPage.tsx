@@ -1,163 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import axios from 'axios';
-import { CheckCircle, ShieldCheck, PlugZap, Link2, AlertTriangle } from 'lucide-react';
+import { CheckCircle, ShieldCheck, PlugZap, Link2, AlertTriangle, RefreshCw } from 'lucide-react';
 import SkeletonBlock from '../ui/SkeletonBlock';
+import { providers, ProviderConfig } from './providerCatalog';
+import { getApiErrorMessage } from '../../utils/apiError';
+import { IntegrationSummary as SummaryPayload } from '../../types/api';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
-
-type IntegrationField = {
-  key: string;
-  label: string;
-  type: 'text' | 'password' | 'textarea' | 'select';
-  required?: boolean;
-  secret?: boolean;
-  options?: string[];
-  placeholder?: string;
-};
-
-type ProviderConfig = {
-  key: string;
-  name: string;
-  description: string;
-  category: string;
-  oauth?: boolean;
-  fields: IntegrationField[];
-  helper?: string;
-};
-
-const providers: ProviderConfig[] = [
-  {
-    key: 'github',
-    name: 'GitHub',
-    description: 'Sync repositories, pipelines, and deploy events.',
-    category: 'Source Control',
-    oauth: true,
-    helper: 'Use a fine-grained token with repo and read:org scopes.',
-    fields: [
-      { key: 'token', label: 'Access token', type: 'password', required: true, secret: true },
-      { key: 'organization', label: 'Organization (optional)', type: 'text', placeholder: 'acme-org' }
-    ]
-  },
-  {
-    key: 'gitlab',
-    name: 'GitLab',
-    description: 'Connect CI/CD pipelines and merge activity.',
-    category: 'Source Control',
-    oauth: true,
-    helper: 'Use a personal access token with read_api scope.',
-    fields: [
-      { key: 'token', label: 'Access token', type: 'password', required: true, secret: true },
-      { key: 'group', label: 'Group (optional)', type: 'text', placeholder: 'team-platform' }
-    ]
-  },
-  {
-    key: 'jenkins',
-    name: 'Jenkins',
-    description: 'Pull pipeline runs and job statuses.',
-    category: 'CI/CD',
-    helper: 'Use a Jenkins API token with read access.',
-    fields: [
-      { key: 'base_url', label: 'Jenkins URL', type: 'text', required: true, placeholder: 'https://jenkins.company.com' },
-      { key: 'username', label: 'Username', type: 'text', required: true },
-      { key: 'api_token', label: 'API token', type: 'password', required: true, secret: true },
-      { key: 'job_prefix', label: 'Job folder (optional)', type: 'text', placeholder: 'team-folder/' }
-    ]
-  },
-  {
-    key: 'aws',
-    name: 'AWS',
-    description: 'Stream infrastructure, cost, and deployment signals.',
-    category: 'Cloud',
-    helper: 'Use least-privilege IAM credentials or role ARN.',
-    fields: [
-      { key: 'access_key_id', label: 'Access key ID', type: 'text', required: true, secret: true },
-      { key: 'secret_access_key', label: 'Secret access key', type: 'password', required: true, secret: true },
-      { key: 'region', label: 'Primary region', type: 'text', placeholder: 'ap-south-1' },
-      { key: 'role_arn', label: 'Role ARN (optional)', type: 'text' }
-    ]
-  },
-  {
-    key: 'azure',
-    name: 'Azure',
-    description: 'Connect subscriptions and monitor resource health.',
-    category: 'Cloud',
-    helper: 'Create an app registration and paste tenant/client details.',
-    fields: [
-      { key: 'tenant_id', label: 'Tenant ID', type: 'text', required: true, secret: true },
-      { key: 'client_id', label: 'Client ID', type: 'text', required: true, secret: true },
-      { key: 'client_secret', label: 'Client secret', type: 'password', required: true, secret: true },
-      { key: 'subscription_id', label: 'Subscription ID', type: 'text' }
-    ]
-  },
-  {
-    key: 'gcp',
-    name: 'GCP',
-    description: 'Ingest project metrics and infra inventory.',
-    category: 'Cloud',
-    helper: 'Paste a service account JSON with viewer access.',
-    fields: [
-      { key: 'project_id', label: 'Project ID', type: 'text', required: true, secret: true },
-      { key: 'service_account_json', label: 'Service account JSON', type: 'textarea', required: true, secret: true }
-    ]
-  },
-  {
-    key: 'datadog',
-    name: 'Datadog',
-    description: 'Stream metrics and incident alerts.',
-    category: 'Monitoring',
-    helper: 'Provide API + application keys from Datadog.',
-    fields: [
-      { key: 'api_key', label: 'API key', type: 'password', required: true, secret: true },
-      { key: 'app_key', label: 'Application key', type: 'password', required: true, secret: true },
-      { key: 'site', label: 'Site', type: 'select', options: ['us1', 'us3', 'us5', 'eu1'] }
-    ]
-  },
-  {
-    key: 'grafana',
-    name: 'Grafana',
-    description: 'Pull dashboards and alert rules.',
-    category: 'Monitoring',
-    helper: 'Use a Grafana API token with read access.',
-    fields: [
-      { key: 'url', label: 'Grafana URL', type: 'text', required: true, secret: true },
-      { key: 'api_token', label: 'API token', type: 'password', required: true, secret: true }
-    ]
-  },
-  {
-    key: 'prometheus',
-    name: 'Prometheus',
-    description: 'Stream metrics endpoints into Aikya.',
-    category: 'Monitoring',
-    helper: 'Provide the Prometheus endpoint and optional token.',
-    fields: [
-      { key: 'endpoint', label: 'Prometheus URL', type: 'text', required: true, secret: true },
-      { key: 'bearer_token', label: 'Bearer token (optional)', type: 'password', secret: true }
-    ]
-  },
-  {
-    key: 'slack',
-    name: 'Slack',
-    description: 'Route alerts and release updates to channels.',
-    category: 'Collaboration',
-    oauth: true,
-    helper: 'Use a bot token from your Slack app.',
-    fields: [
-      { key: 'bot_token', label: 'Bot token', type: 'password', required: true, secret: true },
-      { key: 'workspace', label: 'Workspace', type: 'text', placeholder: 'acme' }
-    ]
-  },
-  {
-    key: 'pagerduty',
-    name: 'PagerDuty',
-    description: 'Wire incidents and escalation policies.',
-    category: 'Collaboration',
-    helper: 'Provide a REST API key to sync services.',
-    fields: [
-      { key: 'api_token', label: 'API token', type: 'password', required: true, secret: true },
-      { key: 'service_id', label: 'Service ID (optional)', type: 'text' }
-    ]
-  }
-];
 
 type IntegrationSummary = {
   id: number;
@@ -173,7 +22,10 @@ const IntegrationsHubPage: React.FC = () => {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [formState, setFormState] = useState<Record<string, Record<string, string>>>({});
   const [status, setStatus] = useState<Record<string, string>>({});
+  const [syncStatus, setSyncStatus] = useState<Record<string, string>>({});
   const [error, setError] = useState<Record<string, string>>({});
+  const [syncing, setSyncing] = useState<Record<string, boolean>>({});
+  const [summaries, setSummaries] = useState<Record<string, SummaryPayload>>({});
   const [loading, setLoading] = useState(false);
 
   const providerMap = useMemo(() => {
@@ -204,6 +56,20 @@ const IntegrationsHubPage: React.FC = () => {
         map[item.type] = item;
       });
       setConnections(map);
+      const summaryMap: Record<string, SummaryPayload> = {};
+      await Promise.all(
+        response.data
+          .filter((item: IntegrationSummary) => item.is_active)
+          .map(async (item: IntegrationSummary) => {
+            try {
+              const summaryRes = await axios.get(`${API_URL}/api/integrations/${item.id}/summary`);
+              summaryMap[item.type] = summaryRes.data;
+            } catch (err) {
+              console.error('Failed to load integration summary:', err);
+            }
+          })
+      );
+      setSummaries((prev) => ({ ...prev, ...summaryMap }));
     } catch (err) {
       console.error('Failed to load integrations:', err);
     } finally {
@@ -225,10 +91,10 @@ const IntegrationsHubPage: React.FC = () => {
         return;
       }
       setError((prev) => ({ ...prev, [providerKey]: 'OAuth URL not returned.' }));
-    } catch (err: any) {
+    } catch (err) {
       setError((prev) => ({
         ...prev,
-        [providerKey]: err.response?.data?.error || 'OAuth setup failed.'
+        [providerKey]: getApiErrorMessage(err, 'OAuth setup failed.')
       }));
       setStatus((prev) => ({ ...prev, [providerKey]: '' }));
     }
@@ -304,11 +170,11 @@ const IntegrationsHubPage: React.FC = () => {
         }, {} as Record<string, string>)
       }));
       fetchConnections();
-    } catch (err: any) {
+    } catch (err) {
       console.error('Integration connect failed:', err);
       setError((prev) => ({
         ...prev,
-        [providerKey]: err.response?.data?.error || 'Failed to connect integration.'
+        [providerKey]: getApiErrorMessage(err, 'Failed to connect integration.')
       }));
     }
   };
@@ -323,11 +189,40 @@ const IntegrationsHubPage: React.FC = () => {
       await axios.post(`${API_URL}/api/integrations/${connection.id}/disconnect`);
       setStatus((prev) => ({ ...prev, [providerKey]: 'Disconnected.' }));
       fetchConnections();
-    } catch (err: any) {
+    } catch (err) {
       setError((prev) => ({
         ...prev,
-        [providerKey]: err.response?.data?.error || 'Failed to disconnect.'
+        [providerKey]: getApiErrorMessage(err, 'Failed to disconnect.')
       }));
+    }
+  };
+
+  const handleSync = async (providerKey: string) => {
+    const connection = connections[providerKey];
+    if (!connection) {
+      return;
+    }
+    setSyncStatus((prev) => ({ ...prev, [providerKey]: '' }));
+    setSyncing((prev) => ({ ...prev, [providerKey]: true }));
+    try {
+      const response = await axios.post(`${API_URL}/api/integrations/${connection.id}/sync`);
+      setSyncStatus((prev) => ({ ...prev, [providerKey]: 'Sync completed.' }));
+      setSummaries((prev) => ({ ...prev, [providerKey]: response.data }));
+      setConnections((prev) => ({
+        ...prev,
+        [providerKey]: {
+          ...prev[providerKey],
+          last_sync: response.data?.last_sync || new Date().toISOString()
+        }
+      }));
+    } catch (err) {
+      console.error('Integration sync failed:', err);
+      setSyncStatus((prev) => ({
+        ...prev,
+        [providerKey]: getApiErrorMessage(err, 'Sync failed.')
+      }));
+    } finally {
+      setSyncing((prev) => ({ ...prev, [providerKey]: false }));
     }
   };
 
@@ -360,6 +255,7 @@ const IntegrationsHubPage: React.FC = () => {
             const isExpanded = expanded[provider.key];
             const providerStatus = status[provider.key];
             const providerError = error[provider.key];
+            const syncSupported = summaries[provider.key]?.supported !== false;
 
             return (
               <div key={provider.key} className="glass rounded-2xl p-6">
@@ -407,6 +303,16 @@ const IntegrationsHubPage: React.FC = () => {
                       Disconnect
                     </button>
                   )}
+                  {isConnected && (
+                    <button
+                      onClick={() => handleSync(provider.key)}
+                      disabled={syncing[provider.key] || !syncSupported}
+                      className="px-4 py-2 rounded-lg border border-white/10 text-white hover:bg-white/10 transition-all text-sm disabled:opacity-60"
+                    >
+                      <RefreshCw className={`h-4 w-4 inline mr-2 ${syncing[provider.key] ? 'animate-spin' : ''}`} />
+                      {syncing[provider.key] ? 'Syncing...' : syncSupported ? 'Sync now' : 'Sync coming soon'}
+                    </button>
+                  )}
                 </div>
 
                 {provider.helper && (
@@ -416,10 +322,27 @@ const IntegrationsHubPage: React.FC = () => {
                 {providerStatus && (
                   <div className="mt-4 text-green-300 text-sm">{providerStatus}</div>
                 )}
+                {syncStatus[provider.key] && (
+                  <div className="mt-2 text-sm text-slate-200">{syncStatus[provider.key]}</div>
+                )}
                 {providerError && (
                   <div className="mt-4 text-red-300 text-sm flex items-center gap-2">
                     <AlertTriangle className="h-4 w-4" />
                     {providerError}
+                  </div>
+                )}
+
+                {isConnected && (
+                  <div className="mt-4 text-xs text-slate-400">
+                    Last sync: {connection?.last_sync ? new Date(connection.last_sync).toLocaleString() : 'Not synced yet'}
+                  </div>
+                )}
+
+                {isConnected && summaries[provider.key]?.entities && (
+                  <div className="mt-2 text-xs text-slate-400">
+                    {Object.entries(summaries[provider.key]?.entities ?? {})
+                      .map(([key, value]) => `${key}: ${value}`)
+                      .join(' • ')}
                   </div>
                 )}
 

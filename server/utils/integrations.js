@@ -1,36 +1,28 @@
-import { db } from '../database/init.js';
+import { Integration, IntegrationSecret } from '../models/index.js';
 import { decryptPayload } from './encryption.js';
 
-const parseConfig = (value) => {
-  if (!value) {
-    return {};
-  }
-  try {
-    return JSON.parse(value);
-  } catch (error) {
-    return {};
-  }
-};
+export const getIntegrationRecord = async (organizationId, type) => {
+  const integration = await Integration.findOne({
+    where: {
+      organization_id: organizationId,
+      type,
+      is_active: true
+    }
+  });
 
-export const getIntegrationRecord = (organizationId, type) => {
-  const row = db.prepare(
-    `SELECT i.id, i.configuration, s.encrypted_payload
-     FROM integrations i
-     LEFT JOIN integration_secrets s ON s.integration_id = i.id
-     WHERE i.organization_id = ? AND i.type = ? AND i.is_active = 1`
-  ).get(organizationId, type);
-
-  if (!row) {
+  if (!integration) {
     return null;
   }
 
-  const configuration = parseConfig(row.configuration);
+  const secret = await IntegrationSecret.findOne({
+    where: { integration_id: integration.id }
+  });
+
   let credentials = null;
 
-  if (row.encrypted_payload) {
+  if (secret?.encrypted_payload) {
     try {
-      const payload = JSON.parse(row.encrypted_payload);
-      credentials = decryptPayload(payload);
+      credentials = decryptPayload(secret.encrypted_payload);
     } catch (error) {
       console.error('Failed to decrypt integration payload:', error);
       credentials = null;
@@ -38,8 +30,8 @@ export const getIntegrationRecord = (organizationId, type) => {
   }
 
   return {
-    id: row.id,
-    configuration,
+    id: integration.id,
+    configuration: integration.configuration || {},
     credentials
   };
 };

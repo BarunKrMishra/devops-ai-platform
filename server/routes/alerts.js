@@ -1,5 +1,6 @@
 import express from 'express';
-import { db } from '../database/init.js';
+import { Op } from 'sequelize';
+import { AlertRule, Incident, Project, User } from '../models/index.js';
 import { createNotification } from './notifications.js';
 import { triggerWebhook } from './webhooks.js';
 import { logAuditAction } from '../utils/audit.js';
@@ -12,29 +13,46 @@ router.get('/rules', async (req, res) => {
     const organizationId = req.user.organization_id;
     const { project_id } = req.query;
 
-    let query = `
-      SELECT ar.*, p.name as project_name, u.name as created_by_name
-      FROM alert_rules ar
-      LEFT JOIN projects p ON ar.project_id = p.id
-      LEFT JOIN users u ON ar.created_by = u.id
-      WHERE p.organization_id = ?
-    `;
-    const params = [organizationId];
-
+    const filters = { organization_id: organizationId };
     if (project_id) {
-      query += ` AND ar.project_id = ?`;
-      params.push(project_id);
+      filters.project_id = project_id;
     }
 
-    query += ` ORDER BY ar.created_at DESC`;
+    const rules = await AlertRule.findAll({
+      where: filters,
+      order: [['created_at', 'DESC']],
+      raw: true
+    });
 
-    const rules = db.prepare(query).all(...params);
+    const projectIds = Array.from(new Set(rules.map((rule) => rule.project_id).filter(Boolean)));
+    const userIds = Array.from(new Set(rules.map((rule) => rule.created_by).filter(Boolean)));
 
-    res.json(rules.map(rule => ({
-      ...rule,
-      escalation_chain: JSON.parse(rule.escalation_chain),
-      notification_channels: JSON.parse(rule.notification_channels)
-    })));
+    const projects = projectIds.length
+      ? await Project.findAll({ where: { id: { [Op.in]: projectIds } }, attributes: ['id', 'name'], raw: true })
+      : [];
+    const users = userIds.length
+      ? await User.findAll({ where: { id: { [Op.in]: userIds } }, attributes: ['id', 'name'], raw: true })
+      : [];
+
+    const projectMap = projects.reduce((acc, project) => {
+      acc[project.id] = project.name;
+      return acc;
+    }, {});
+
+    const userMap = users.reduce((acc, user) => {
+      acc[user.id] = user.name;
+      return acc;
+    }, {});
+
+    res.json(
+      rules.map((rule) => ({
+        ...rule,
+        project_name: projectMap[rule.project_id] || null,
+        created_by_name: userMap[rule.created_by] || null,
+        escalation_chain: rule.escalation_chain || [],
+        notification_channels: rule.notification_channels || []
+      }))
+    );
   } catch (error) {
     console.error('Alert rules fetch error:', error);
     res.status(500).json({ error: 'Failed to fetch alert rules' });
@@ -56,30 +74,33 @@ router.post('/rules', async (req, res) => {
     } = req.body;
     const userId = req.user.id;
 
-    const result = db.prepare(`
-      INSERT INTO alert_rules (
-        project_id, name, condition_type, threshold_value, comparison_operator,
-        duration_minutes, escalation_chain, notification_channels, created_by
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      project_id,
+    if (project_id) {
+      const project = await Project.findOne({ where: { id: project_id, organization_id: req.user.organization_id } });
+      if (!project) {
+        return res.status(404).json({ error: 'Project not found' });
+      }
+    }
+
+    const rule = await AlertRule.create({
+      organization_id: req.user.organization_id,
+      project_id: project_id || null,
       name,
       condition_type,
       threshold_value,
       comparison_operator,
-      duration_minutes || 5,
-      JSON.stringify(escalation_chain || []),
-      JSON.stringify(notification_channels || []),
-      userId
-    );
+      duration_minutes: duration_minutes || 5,
+      escalation_chain: escalation_chain || [],
+      notification_channels: notification_channels || [],
+      created_by: userId
+    });
 
-    await logAuditAction(userId, 'CREATE_ALERT_RULE', 'alert_rule', result.lastInsertRowid, {
+    await logAuditAction(userId, 'CREATE_ALERT_RULE', 'alert_rule', rule.id, {
       name,
       condition_type,
       threshold_value
     });
 
-    res.json({ id: result.lastInsertRowid, message: 'Alert rule created successfully' });
+    res.json({ id: rule.id, message: 'Alert rule created successfully' });
   } catch (error) {
     console.error('Alert rule creation error:', error);
     res.status(500).json({ error: 'Failed to create alert rule' });
@@ -103,37 +124,28 @@ router.put('/rules/:id', async (req, res) => {
     const userId = req.user.id;
     const organizationId = req.user.organization_id;
 
-    // Verify rule belongs to organization
-    const rule = db.prepare(`
-      SELECT ar.id FROM alert_rules ar
-      JOIN projects p ON ar.project_id = p.id
-      WHERE ar.id = ? AND p.organization_id = ?
-    `).get(id, organizationId);
+    const rule = await AlertRule.findOne({ where: { id, organization_id: organizationId }, raw: true });
 
     if (!rule) {
       return res.status(404).json({ error: 'Alert rule not found' });
     }
 
-    db.prepare(`
-      UPDATE alert_rules 
-      SET name = ?, condition_type = ?, threshold_value = ?, comparison_operator = ?,
-          duration_minutes = ?, escalation_chain = ?, notification_channels = ?, is_active = ?
-      WHERE id = ?
-    `).run(
-      name,
-      condition_type,
-      threshold_value,
-      comparison_operator,
-      duration_minutes,
-      JSON.stringify(escalation_chain),
-      JSON.stringify(notification_channels),
-      is_active,
-      id
-    );
+    const updatePayload = {
+      name: name ?? rule.name,
+      condition_type: condition_type ?? rule.condition_type,
+      threshold_value: threshold_value ?? rule.threshold_value,
+      comparison_operator: comparison_operator ?? rule.comparison_operator,
+      duration_minutes: duration_minutes ?? rule.duration_minutes,
+      escalation_chain: escalation_chain !== undefined ? escalation_chain : rule.escalation_chain,
+      notification_channels: notification_channels !== undefined ? notification_channels : rule.notification_channels,
+      is_active: is_active !== undefined ? is_active : rule.is_active
+    };
+
+    await AlertRule.update(updatePayload, { where: { id } });
 
     await logAuditAction(userId, 'UPDATE_ALERT_RULE', 'alert_rule', id, {
-      name,
-      is_active
+      name: updatePayload.name,
+      is_active: updatePayload.is_active
     });
 
     res.json({ message: 'Alert rule updated successfully' });
@@ -150,18 +162,13 @@ router.delete('/rules/:id', async (req, res) => {
     const userId = req.user.id;
     const organizationId = req.user.organization_id;
 
-    // Verify rule belongs to organization
-    const rule = db.prepare(`
-      SELECT ar.name FROM alert_rules ar
-      JOIN projects p ON ar.project_id = p.id
-      WHERE ar.id = ? AND p.organization_id = ?
-    `).get(id, organizationId);
+    const rule = await AlertRule.findOne({ where: { id, organization_id: organizationId }, raw: true });
 
     if (!rule) {
       return res.status(404).json({ error: 'Alert rule not found' });
     }
 
-    db.prepare('DELETE FROM alert_rules WHERE id = ?').run(id);
+    await AlertRule.destroy({ where: { id } });
 
     await logAuditAction(userId, 'DELETE_ALERT_RULE', 'alert_rule', id, {
       name: rule.name
@@ -180,36 +187,58 @@ router.get('/incidents', async (req, res) => {
     const organizationId = req.user.organization_id;
     const { status, severity, project_id } = req.query;
 
-    let query = `
-      SELECT i.*, p.name as project_name, ar.name as alert_rule_name, u.name as assigned_to_name
-      FROM incidents i
-      LEFT JOIN projects p ON i.project_id = p.id
-      LEFT JOIN alert_rules ar ON i.alert_rule_id = ar.id
-      LEFT JOIN users u ON i.assigned_to = u.id
-      WHERE p.organization_id = ?
-    `;
-    const params = [organizationId];
-
+    const filters = { organization_id: organizationId };
     if (status) {
-      query += ` AND i.status = ?`;
-      params.push(status);
+      filters.status = status;
     }
-
     if (severity) {
-      query += ` AND i.severity = ?`;
-      params.push(severity);
+      filters.severity = severity;
     }
-
     if (project_id) {
-      query += ` AND i.project_id = ?`;
-      params.push(project_id);
+      filters.project_id = project_id;
     }
 
-    query += ` ORDER BY i.created_at DESC`;
+    const incidents = await Incident.findAll({
+      where: filters,
+      order: [['created_at', 'DESC']],
+      raw: true
+    });
 
-    const incidents = db.prepare(query).all(...params);
+    const projectIds = Array.from(new Set(incidents.map((incident) => incident.project_id).filter(Boolean)));
+    const alertRuleIds = Array.from(new Set(incidents.map((incident) => incident.alert_rule_id).filter(Boolean)));
+    const assignedUserIds = Array.from(new Set(incidents.map((incident) => incident.assigned_to).filter(Boolean)));
 
-    res.json(incidents);
+    const projects = projectIds.length
+      ? await Project.findAll({ where: { id: { [Op.in]: projectIds } }, attributes: ['id', 'name'], raw: true })
+      : [];
+    const alertRules = alertRuleIds.length
+      ? await AlertRule.findAll({ where: { id: { [Op.in]: alertRuleIds } }, attributes: ['id', 'name'], raw: true })
+      : [];
+    const users = assignedUserIds.length
+      ? await User.findAll({ where: { id: { [Op.in]: assignedUserIds } }, attributes: ['id', 'name'], raw: true })
+      : [];
+
+    const projectMap = projects.reduce((acc, project) => {
+      acc[project.id] = project.name;
+      return acc;
+    }, {});
+    const ruleMap = alertRules.reduce((acc, rule) => {
+      acc[rule.id] = rule.name;
+      return acc;
+    }, {});
+    const userMap = users.reduce((acc, user) => {
+      acc[user.id] = user.name;
+      return acc;
+    }, {});
+
+    res.json(
+      incidents.map((incident) => ({
+        ...incident,
+        project_name: projectMap[incident.project_id] || null,
+        alert_rule_name: ruleMap[incident.alert_rule_id] || null,
+        assigned_to_name: userMap[incident.assigned_to] || null
+      }))
+    );
   } catch (error) {
     console.error('Incidents fetch error:', error);
     res.status(500).json({ error: 'Failed to fetch incidents' });
@@ -228,38 +257,47 @@ router.post('/incidents', async (req, res) => {
     } = req.body;
     const userId = req.user.id;
 
-    const result = db.prepare(`
-      INSERT INTO incidents (project_id, alert_rule_id, title, description, severity)
-      VALUES (?, ?, ?, ?, ?)
-    `).run(project_id, alert_rule_id, title, description, severity);
+    if (project_id) {
+      const project = await Project.findOne({ where: { id: project_id, organization_id: req.user.organization_id } });
+      if (!project) {
+        return res.status(404).json({ error: 'Project not found' });
+      }
+    }
 
-    const incidentId = result.lastInsertRowid;
+    const incident = await Incident.create({
+      organization_id: req.user.organization_id,
+      project_id: project_id || null,
+      alert_rule_id: alert_rule_id || null,
+      title,
+      description,
+      severity,
+      created_by: userId
+    });
 
-    // Create notification
     await createNotification({
       organization_id: req.user.organization_id,
       type: 'incident',
       title: `New ${severity} severity incident`,
       message: title,
       priority: severity === 'high' ? 'high' : 'normal',
-      data: { incident_id: incidentId, project_id }
+      data: { incident_id: incident.id, project_id }
     });
 
-    // Trigger webhooks
     await triggerWebhook('incident.created', {
-      incident_id: incidentId,
+      incident_id: incident.id,
       project_id,
       severity,
-      title
+      title,
+      organization_id: req.user.organization_id
     });
 
-    await logAuditAction(userId, 'CREATE_INCIDENT', 'incident', incidentId, {
+    await logAuditAction(userId, 'CREATE_INCIDENT', 'incident', incident.id, {
       title,
       severity,
       project_id
     });
 
-    res.json({ id: incidentId, message: 'Incident created successfully' });
+    res.json({ id: incident.id, message: 'Incident created successfully' });
   } catch (error) {
     console.error('Incident creation error:', error);
     res.status(500).json({ error: 'Failed to create incident' });
@@ -274,33 +312,27 @@ router.put('/incidents/:id', async (req, res) => {
     const userId = req.user.id;
     const organizationId = req.user.organization_id;
 
-    // Verify incident belongs to organization
-    const incident = db.prepare(`
-      SELECT i.title, i.status as current_status FROM incidents i
-      JOIN projects p ON i.project_id = p.id
-      WHERE i.id = ? AND p.organization_id = ?
-    `).get(id, organizationId);
+    const incident = await Incident.findOne({ where: { id, organization_id: organizationId }, raw: true });
 
     if (!incident) {
       return res.status(404).json({ error: 'Incident not found' });
     }
 
-    const updateData = { status, assigned_to };
+    const updateData = {};
+    if (status !== undefined) {
+      updateData.status = status;
+    }
+    if (assigned_to !== undefined) {
+      updateData.assigned_to = assigned_to;
+    }
     if (status === 'resolved') {
-      updateData.resolved_at = new Date().toISOString();
+      updateData.resolved_at = new Date();
       updateData.resolution_notes = resolution_notes;
     }
 
-    const setClause = Object.keys(updateData)
-      .map(key => `${key} = ?`)
-      .join(', ');
-    const values = Object.values(updateData);
+    await Incident.update(updateData, { where: { id } });
 
-    db.prepare(`UPDATE incidents SET ${setClause} WHERE id = ?`)
-      .run(...values, id);
-
-    // Create notification if status changed
-    if (status !== incident.current_status) {
+    if (status && status !== incident.status) {
       await createNotification({
         organization_id: organizationId,
         type: 'incident_update',
@@ -309,11 +341,11 @@ router.put('/incidents/:id', async (req, res) => {
         data: { incident_id: id, status }
       });
 
-      // Trigger webhooks
       await triggerWebhook('incident.updated', {
         incident_id: id,
         status,
-        previous_status: incident.current_status
+        previous_status: incident.status,
+        organization_id: organizationId
       });
     }
 
@@ -332,46 +364,42 @@ router.put('/incidents/:id', async (req, res) => {
 // Trigger alert (internal function for monitoring)
 export const triggerAlert = async (alertRuleId, metricValue, projectId) => {
   try {
-    const rule = db.prepare('SELECT * FROM alert_rules WHERE id = ? AND is_active = 1').get(alertRuleId);
+    const rule = await AlertRule.findOne({ where: { id: alertRuleId, is_active: true }, raw: true });
     if (!rule) return;
 
-    const escalationChain = JSON.parse(rule.escalation_chain);
-    const notificationChannels = JSON.parse(rule.notification_channels);
+    const escalationChain = Array.isArray(rule.escalation_chain) ? rule.escalation_chain : [];
 
-    // Create incident
-    const incident = db.prepare(`
-      INSERT INTO incidents (project_id, alert_rule_id, title, description, severity)
-      VALUES (?, ?, ?, ?, ?)
-    `).run(
-      projectId,
-      alertRuleId,
-      `Alert: ${rule.name}`,
-      `${rule.condition_type} ${rule.comparison_operator} ${rule.threshold_value} (current: ${metricValue})`,
-      'medium'
-    );
+    const incident = await Incident.create({
+      organization_id: rule.organization_id,
+      project_id: projectId || null,
+      alert_rule_id: alertRuleId,
+      title: `Alert: ${rule.name}`,
+      description: `${rule.condition_type} ${rule.comparison_operator} ${rule.threshold_value} (current: ${metricValue})`,
+      severity: 'medium'
+    });
 
-    // Send notifications based on escalation chain
     for (const userId of escalationChain) {
       await createNotification({
         user_id: userId,
+        organization_id: rule.organization_id,
         type: 'alert',
         title: `Alert: ${rule.name}`,
         message: `${rule.condition_type} threshold exceeded`,
         priority: 'high',
-        data: { 
-          incident_id: incident.lastInsertRowid,
+        data: {
+          incident_id: incident.id,
           metric_value: metricValue,
           threshold: rule.threshold_value
         }
       });
     }
 
-    // Trigger webhooks
     await triggerWebhook('alert.triggered', {
       alert_rule_id: alertRuleId,
-      incident_id: incident.lastInsertRowid,
+      incident_id: incident.id,
       project_id: projectId,
-      metric_value: metricValue
+      metric_value: metricValue,
+      organization_id: rule.organization_id
     });
 
   } catch (error) {

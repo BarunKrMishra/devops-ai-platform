@@ -5,7 +5,7 @@
  * Usage: node scripts/test-deployment.js [backend-url]
  */
 
-import fetch from 'node-fetch';
+// Uses Node's built-in global fetch (Node 18+); no external dependency needed.
 
 const BACKEND_URL = process.argv[2] || 'http://localhost:3001';
 

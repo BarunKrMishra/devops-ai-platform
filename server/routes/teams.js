@@ -1,5 +1,6 @@
 import express from 'express';
-import { db } from '../database/init.js';
+import { Op } from 'sequelize';
+import { Team, TeamMember, User } from '../models/index.js';
 import { requireRole } from '../middleware/auth.js';
 import { logAuditAction } from '../utils/audit.js';
 
@@ -10,38 +11,51 @@ router.get('/', async (req, res) => {
   try {
     const organizationId = req.user.organization_id;
 
-    const teams = db.prepare(`
-      SELECT id, name, description, created_at
-      FROM teams
-      WHERE organization_id = ?
-      ORDER BY name
-    `).all(organizationId);
+    const teams = await Team.findAll({
+      where: { organization_id: organizationId },
+      order: [['name', 'ASC']],
+      raw: true
+    });
 
-    const members = db.prepare(`
-      SELECT tm.team_id, u.id, u.name, u.email, u.role
-      FROM team_members tm
-      JOIN users u ON u.id = tm.user_id
-      JOIN teams t ON t.id = tm.team_id
-      WHERE t.organization_id = ? AND u.is_active = 1
-      ORDER BY u.name
-    `).all(organizationId);
+    const teamMembers = await TeamMember.findAll({
+      where: { organization_id: organizationId },
+      raw: true
+    });
 
-    const membersByTeam = members.reduce((acc, member) => {
-      if (!acc[member.team_id]) {
-        acc[member.team_id] = [];
+    const userIds = Array.from(new Set(teamMembers.map((member) => member.user_id).filter(Boolean)));
+    const users = userIds.length
+      ? await User.findAll({
+          where: { id: { [Op.in]: userIds }, is_active: true },
+          attributes: ['id', 'name', 'email', 'role', 'is_active'],
+          raw: true
+        })
+      : [];
+
+    const usersById = users.reduce((acc, user) => {
+      acc[user.id] = user;
+      return acc;
+    }, {});
+
+    const membersByTeam = teamMembers.reduce((acc, member) => {
+      const teamId = String(member.team_id);
+      if (!acc[teamId]) {
+        acc[teamId] = [];
       }
-      acc[member.team_id].push({
-        id: member.id,
-        name: member.name,
-        email: member.email,
-        role: member.role
-      });
+      const user = usersById[member.user_id];
+      if (user && user.is_active !== false) {
+        acc[teamId].push({
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          role: user.role
+        });
+      }
       return acc;
     }, {});
 
     const response = teams.map((team) => ({
       ...team,
-      members: membersByTeam[team.id] || []
+      members: membersByTeam[String(team.id)] || []
     }));
 
     res.json(response);
@@ -62,18 +76,20 @@ router.post('/', requireRole(['admin', 'manager']), async (req, res) => {
       return res.status(400).json({ error: 'Team name is required.' });
     }
 
-    const result = db.prepare(`
-      INSERT INTO teams (organization_id, name, description, created_by)
-      VALUES (?, ?, ?, ?)
-    `).run(organizationId, name.trim(), description?.trim() || null, userId);
-
-    await logAuditAction(userId, 'CREATE_TEAM', 'team', result.lastInsertRowid, {
-      name: name.trim()
+    const team = await Team.create({
+      organization_id: organizationId,
+      name: name.trim(),
+      description: description?.trim() || null,
+      created_by: userId
     });
 
-    res.json({ id: result.lastInsertRowid, message: 'Team created successfully' });
+    await logAuditAction(userId, 'CREATE_TEAM', 'team', team.id, {
+      name: team.name
+    });
+
+    res.json({ id: team.id, message: 'Team created successfully' });
   } catch (error) {
-    if (error.code === 'SQLITE_CONSTRAINT_UNIQUE') {
+    if (error?.name === 'SequelizeUniqueConstraintError') {
       return res.status(400).json({ error: 'A team with this name already exists.' });
     }
     console.error('Team creation error:', error);
@@ -88,15 +104,13 @@ router.delete('/:teamId', requireRole(['admin', 'manager']), async (req, res) =>
     const organizationId = req.user.organization_id;
     const userId = req.user.id;
 
-    const team = db.prepare(`
-      SELECT id, name FROM teams WHERE id = ? AND organization_id = ?
-    `).get(teamId, organizationId);
-
+    const team = await Team.findOne({ where: { id: teamId, organization_id: organizationId }, raw: true });
     if (!team) {
       return res.status(404).json({ error: 'Team not found.' });
     }
 
-    db.prepare('DELETE FROM teams WHERE id = ?').run(teamId);
+    await Team.destroy({ where: { id: teamId, organization_id: organizationId } });
+    await TeamMember.destroy({ where: { team_id: teamId, organization_id: organizationId } });
 
     await logAuditAction(userId, 'DELETE_TEAM', 'team', teamId, { name: team.name });
 
@@ -118,20 +132,23 @@ router.post('/:teamId/members', requireRole(['admin', 'manager']), async (req, r
       return res.status(400).json({ error: 'User is required.' });
     }
 
-    const team = db.prepare('SELECT id FROM teams WHERE id = ? AND organization_id = ?').get(teamId, organizationId);
+    const team = await Team.findOne({ where: { id: teamId, organization_id: organizationId }, raw: true });
     if (!team) {
       return res.status(404).json({ error: 'Team not found.' });
     }
 
-    const member = db.prepare('SELECT id FROM users WHERE id = ? AND organization_id = ? AND is_active = 1').get(userId, organizationId);
+    const member = await User.findOne({
+      where: { id: userId, organization_id: organizationId, is_active: true },
+      raw: true
+    });
     if (!member) {
       return res.status(404).json({ error: 'User not found.' });
     }
 
-    db.prepare(`
-      INSERT OR IGNORE INTO team_members (team_id, user_id, role)
-      VALUES (?, ?, 'member')
-    `).run(teamId, userId);
+    await TeamMember.findOrCreate({
+      where: { team_id: teamId, user_id: userId },
+      defaults: { organization_id: organizationId, role: 'member' }
+    });
 
     res.json({ message: 'Member added to team.' });
   } catch (error) {
@@ -146,15 +163,12 @@ router.delete('/:teamId/members/:memberId', requireRole(['admin', 'manager']), a
     const { teamId, memberId } = req.params;
     const organizationId = req.user.organization_id;
 
-    const team = db.prepare('SELECT id FROM teams WHERE id = ? AND organization_id = ?').get(teamId, organizationId);
+    const team = await Team.findOne({ where: { id: teamId, organization_id: organizationId }, raw: true });
     if (!team) {
       return res.status(404).json({ error: 'Team not found.' });
     }
 
-    db.prepare(`
-      DELETE FROM team_members
-      WHERE team_id = ? AND user_id = ?
-    `).run(teamId, memberId);
+    await TeamMember.destroy({ where: { team_id: teamId, user_id: memberId, organization_id: organizationId } });
 
     res.json({ message: 'Member removed from team.' });
   } catch (error) {

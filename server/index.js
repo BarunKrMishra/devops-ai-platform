@@ -2,6 +2,7 @@ import './config/env.js';
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
+import compression from 'compression';
 import rateLimit from 'express-rate-limit';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
@@ -26,9 +27,16 @@ import integrationsRoutes, { oauthCallbackRouter } from './routes/integrations.j
 import teamsRoutes from './routes/teams.js';
 import invitesRoutes from './routes/invites.js';
 import usersRoutes from './routes/users.js';
+import businessRoutes from './routes/business.js';
+import opsRoutes from './routes/ops.js';
+import billingRoutes from './routes/billing.js';
+import contentRoutes from './routes/content.js';
 import { authenticateToken } from './middleware/auth.js';
-import { initDatabase } from './database/init.js';
+import { Project } from './models/index.js';
+import { initializeDatabase } from './database/index.js';
 import { startUsageMetricsJob } from './jobs/usageMetrics.js';
+import { startIntegrationSyncJob } from './jobs/integrationSync.js';
+import { withRequestContext } from './utils/requestContext.js';
 
 // Environment variables
 const NODE_ENV = process.env.NODE_ENV || 'development';
@@ -56,21 +64,20 @@ CORS_ORIGIN = Array.from(new Set([
   ...CORS_ORIGIN
 ].filter(Boolean)));
 
-// Add common Netlify domains if not already included
-const commonNetlifyDomains = [
-  'https://*.netlify.app',
-  'https://*.netlify.com'
-];
+// Allow Netlify preview/production subdomains in production. The cors package
+// only wildcard-matches via RegExp (a literal "*.netlify.app" string never
+// matches a real Origin header), so use anchored regexes.
+const netlifyOriginPatterns = [/\.netlify\.app$/, /\.netlify\.com$/];
 
-// Only add Netlify domains if we're in production and they're not already included
-if (NODE_ENV === 'production' && !CORS_ORIGIN.some(origin => origin.includes('netlify'))) {
-  CORS_ORIGIN = [...CORS_ORIGIN, ...commonNetlifyDomains];
+if (NODE_ENV === 'production' && !CORS_ORIGIN.some(origin => typeof origin === 'string' && origin.includes('netlify'))) {
+  CORS_ORIGIN = [...CORS_ORIGIN, ...netlifyOriginPatterns];
 }
 
 console.log('CORS Origins configured:', CORS_ORIGIN);
 
-const RATE_LIMIT_WINDOW_MS = process.env.RATE_LIMIT_WINDOW_MS || 15 * 60 * 1000; // 15 minutes
-const RATE_LIMIT_MAX = process.env.RATE_LIMIT_MAX || 100; // Limit each IP to 100 requests per windowMs
+const RATE_LIMIT_WINDOW_MS = Number(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000; // 15 minutes
+const RATE_LIMIT_MAX = Number(process.env.RATE_LIMIT_MAX) || (NODE_ENV === 'production' ? 100 : 1000);
+const RATE_LIMIT_ENABLED = process.env.RATE_LIMIT_ENABLED !== 'false';
 
 // Configure logger
 const logger = winston.createLogger({
@@ -112,6 +119,8 @@ const io = new Server(server, {
 
 // Security middleware
 app.use(helmet());
+// Gzip responses for smaller payloads / faster loads.
+app.use(compression());
 app.use(cors({
   origin: CORS_ORIGIN,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
@@ -123,13 +132,37 @@ app.use(cors({
 const limiter = rateLimit({
   windowMs: RATE_LIMIT_WINDOW_MS,
   max: RATE_LIMIT_MAX,
-  message: 'Too many requests from this IP, please try again later.'
+  message: 'Too many requests from this IP, please try again later.',
+  skip: () => !RATE_LIMIT_ENABLED || NODE_ENV !== 'production'
 });
 app.use('/api/', limiter);
+
+// Dedicated throttle for authentication endpoints. Always on (independent of
+// NODE_ENV) to blunt password / OTP brute-force attempts. Generous enough for
+// legitimate register->verify and login->verify flows.
+const AUTH_RATE_LIMIT_ENABLED = process.env.AUTH_RATE_LIMIT_ENABLED !== 'false';
+const AUTH_RATE_LIMIT_MAX = Number(process.env.AUTH_RATE_LIMIT_MAX) || 30;
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: AUTH_RATE_LIMIT_MAX,
+  message: 'Too many authentication attempts. Please try again later.',
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: () => !AUTH_RATE_LIMIT_ENABLED
+});
+app.use('/api/auth/login', authLimiter);
+app.use('/api/auth/register', authLimiter);
+app.use('/api/auth/request-password-reset', authLimiter);
+app.use('/api/auth/verify-otp', authLimiter);
+app.use('/api/auth/reset-password', authLimiter);
+app.use('/api/auth/verify-2fa', authLimiter);
 
 // Body parsing middleware with size limits
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// Request context middleware for audit logging
+app.use(withRequestContext);
 
 // Request ID middleware
 app.use((req, res, next) => {
@@ -157,8 +190,9 @@ app.use((req, res, next) => {
 });
 
 // Initialize database
-await initDatabase();
+await initializeDatabase();
 startUsageMetricsJob();
+startIntegrationSyncJob();
 
 // Socket.IO authentication middleware
 io.use((socket, next) => {
@@ -181,6 +215,7 @@ io.use((socket, next) => {
 // Routes
 // Health check route (no authentication required)
 app.use('/api/health', healthRoutes);
+app.use('/api/content', contentRoutes);
 app.use('/api/invites', invitesRoutes);
 
 // Protected routes
@@ -200,6 +235,9 @@ app.use('/api/alerts', authenticateToken, alertsRoutes);
 app.use('/api/onboarding', authenticateToken, onboardingRoutes);
 app.use('/api/integrations/oauth', oauthCallbackRouter);
 app.use('/api/integrations', authenticateToken, integrationsRoutes);
+app.use('/api/business', authenticateToken, businessRoutes);
+app.use('/api/ops', authenticateToken, opsRoutes);
+app.use('/api/billing', authenticateToken, billingRoutes);
 
 // WebSocket connection handling with improved security and error handling
 io.on('connection', (socket) => {
@@ -239,9 +277,23 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('join-project', (projectId) => {
-    // TODO: Add project access verification
-    socket.join(`project-${projectId}`);
+  socket.on('join-project', async (projectId) => {
+    // Only allow joining a project room if the project belongs to the
+    // authenticated user's organization (prevents cross-tenant snooping).
+    try {
+      const project = await Project.findOne({
+        where: { id: projectId, organization_id: socket.user.organization_id },
+        attributes: ['id']
+      });
+      if (project) {
+        socket.join(`project-${projectId}`);
+      } else {
+        socket.emit('error', 'Access denied to project');
+      }
+    } catch (error) {
+      logger.error('join-project verification failed:', error);
+      socket.emit('error', 'Unable to join project');
+    }
   });
 
   socket.on('error', (error) => {

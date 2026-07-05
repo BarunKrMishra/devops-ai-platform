@@ -4,6 +4,7 @@ import axios from 'axios';
 import { useAuth } from '../../contexts/AuthContext';
 import EmptyState from '../ui/EmptyState';
 import SkeletonBlock from '../ui/SkeletonBlock';
+import { getApiErrorMessage } from '../../utils/apiError';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
@@ -38,7 +39,7 @@ interface Template {
   name: string;
   description: string;
   category: string;
-  template_data: any;
+  template_data: unknown;
   is_public: boolean;
   created_by_name: string;
   tags: string[];
@@ -50,7 +51,7 @@ interface Template {
 const TemplateGalleryPage: React.FC = () => {
   const { token } = useAuth();
   const [templates, setTemplates] = useState<Template[]>([]);
-  const [categories, setCategories] = useState<any[]>([]);
+  const [categories, setCategories] = useState<{ category: string; count: number }[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('');
@@ -186,7 +187,7 @@ const TemplateGalleryPage: React.FC = () => {
       return;
     }
 
-    let parsedData: any;
+    let parsedData: unknown;
     try {
       parsedData = JSON.parse(createForm.templateData);
     } catch (error) {
@@ -213,9 +214,9 @@ const TemplateGalleryPage: React.FC = () => {
       resetCreateForm();
       setActionMessage('Template created and ready to use.');
       await Promise.all([fetchTemplates(), fetchCategories()]);
-    } catch (error: any) {
+    } catch (error) {
       console.error('Failed to create template:', error);
-      setCreateError(error.response?.data?.error || 'Failed to create template.');
+      setCreateError(getApiErrorMessage(error, 'Failed to create template.'));
     } finally {
       setCreateLoading(false);
     }

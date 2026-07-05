@@ -1,22 +1,23 @@
 import React, { useEffect, useState } from 'react';
 import { Activity, ArrowUpRight } from 'lucide-react';
-
-const metrics = [
-  { label: 'Deploys orchestrated', value: '18,240', detail: '+12% this month' },
-  { label: 'Incidents auto-resolved', value: '1,382', detail: '-28% MTTR' },
-  { label: 'Cloud cost saved', value: '$214k', detail: 'avg per quarter' },
-  { label: 'Guardrails triggered', value: '7,904', detail: 'zero critical escapes' }
-];
+import { useContent } from '../../contexts/ContentContext';
 
 const MetricsPulse: React.FC = () => {
   const [activeIndex, setActiveIndex] = useState(0);
+  const { content } = useContent();
+  const metricsPulse = content.landing.metricsPulse;
+  const metrics = metricsPulse.metrics || [];
+  const insightPanel = metricsPulse.insightPanel;
 
   useEffect(() => {
+    if (metrics.length < 1) {
+      return;
+    }
     const interval = setInterval(() => {
       setActiveIndex((prev) => (prev + 1) % metrics.length);
     }, 2400);
     return () => clearInterval(interval);
-  }, []);
+  }, [metrics.length]);
 
   return (
     <section className="px-6 pb-20">
@@ -25,13 +26,13 @@ const MetricsPulse: React.FC = () => {
           <div className="glass rounded-2xl p-8">
             <div className="flex items-center gap-3 text-amber-200">
               <Activity className="h-5 w-5" />
-              <span className="text-sm uppercase tracking-[0.3em]">Aikya Pulse</span>
+              <span className="text-sm uppercase tracking-[0.3em]">{metricsPulse.kicker}</span>
             </div>
             <h3 className="text-3xl font-display text-white mt-4">
-              Live operational clarity without the noise.
+              {metricsPulse.title}
             </h3>
             <p className="text-slate-300 mt-3">
-              Aikya surfaces the right signal and keeps teams aligned with calm, continuous insights.
+              {metricsPulse.subtitle}
             </p>
             <div className="mt-6 grid gap-4 md:grid-cols-2">
               {metrics.map((metric, index) => (
@@ -54,25 +55,21 @@ const MetricsPulse: React.FC = () => {
 
           <div className="glass rounded-2xl p-8 flex flex-col justify-between">
             <div>
-              <p className="text-sm uppercase tracking-[0.3em] text-slate-400">Why it feels alive</p>
-              <h4 className="text-2xl font-display text-white mt-4">Operational context, refreshed.</h4>
-              <p className="text-slate-300 mt-3">
-                Aikya keeps your team focused on the most important workflows, updated every few minutes.
-              </p>
+              <p className="text-sm uppercase tracking-[0.3em] text-slate-400">{insightPanel?.kicker}</p>
+              <h4 className="text-2xl font-display text-white mt-4">{insightPanel?.title}</h4>
+              <p className="text-slate-300 mt-3">{insightPanel?.subtitle}</p>
             </div>
             <div className="mt-8 space-y-3 text-sm text-slate-300">
-              <div className="flex items-center gap-2">
-                <span className="h-2 w-2 rounded-full bg-amber-400"></span>
-                Deployment readiness signals
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="h-2 w-2 rounded-full bg-teal-400"></span>
-                Cost and capacity forecasts
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="h-2 w-2 rounded-full bg-orange-400"></span>
-                Incident and drift watchlists
-              </div>
+              {metricsPulse.insights?.map((insight, index) => (
+                <div key={insight} className="flex items-center gap-2">
+                  <span
+                    className={`h-2 w-2 rounded-full ${
+                      index % 3 === 0 ? 'bg-amber-400' : index % 3 === 1 ? 'bg-teal-400' : 'bg-orange-400'
+                    }`}
+                  ></span>
+                  {insight}
+                </div>
+              ))}
             </div>
           </div>
         </div>

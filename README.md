@@ -17,7 +17,7 @@ A modern DevOps platform with AI-powered automation, CI/CD pipelines, infrastruc
 
 - Frontend: React, TypeScript, TailwindCSS
 - Backend: Node.js, Express
-- Database: SQLite
+- Database: MySQL
 - Authentication: JWT, GitHub OAuth
 - AI/ML: OpenAI, Anthropic, Google AI
 - Cloud: AWS, GCP, Azure
@@ -56,8 +56,15 @@ A modern DevOps platform with AI-powered automation, CI/CD pipelines, infrastruc
    GITHUB_CLIENT_ID=your_github_client_id
    GITHUB_CLIENT_SECRET=your_github_client_secret
 
-   # Database
-   DB_PATH=./devops_ai.db
+   # Database (choose one)
+   MYSQL_URL=mysql://user:password@localhost:3306/aikya
+   # or
+   MYSQL_HOST=localhost
+   MYSQL_PORT=3306
+   MYSQL_USER=root
+   MYSQL_PASSWORD=your_password
+   MYSQL_DATABASE=aikya
+   MYSQL_SSL=false
    ```
 
 4. Set up GitHub OAuth:
@@ -67,7 +74,12 @@ A modern DevOps platform with AI-powered automation, CI/CD pipelines, infrastruc
    - Set Callback URL to `http://localhost:3001/api/auth/github/callback`
    - Copy Client ID and Client Secret to your `.env` file
 
-5. Start the development server:
+5. (Optional) Run migrations manually:
+   ```bash
+   npm run migrate
+   ```
+
+6. Start the development server:
    ```bash
    npm run dev
    ```
@@ -96,14 +108,14 @@ A modern DevOps platform with AI-powered automation, CI/CD pipelines, infrastruc
 
 Notes:
 - The API runs on port 3001 inside the Docker network.
-- SQLite data is stored in a Docker volume named `aikya_data`.
+- MySQL data is stored in the `aikya_mysql` volume (when using the bundled database).
 - Set `APP_BASE_URL`, `CORS_ORIGIN`, and `VITE_API_URL` to include port 2025.
 
 ## Development
 
 - Frontend runs on port 5173
 - Backend runs on port 3001
-- Database is stored in `devops_ai.db`
+- Database runs in MySQL (local or external)
 
 ## Contributing
 

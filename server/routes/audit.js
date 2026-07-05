@@ -1,87 +1,78 @@
 import express from 'express';
-import { db } from '../database/init.js';
+import { Op, fn, col } from 'sequelize';
+import { AuditLog, User } from '../models/index.js';
 import { requireRole } from '../middleware/auth.js';
 
 const router = express.Router();
 
-// Get audit logs (admin only)
-router.get('/logs', requireRole(['admin']), async (req, res) => {
+const buildDateFilter = (startDate, endDate) => {
+  const filter = {};
+  if (startDate) {
+    filter[Op.gte] = new Date(startDate);
+  }
+  if (endDate) {
+    filter[Op.lte] = new Date(endDate);
+  }
+  return Object.keys(filter).length ? filter : null;
+};
+
+const mapUsers = async (logs) => {
+  const userIds = Array.from(new Set(logs.map((log) => log.user_id).filter(Boolean)));
+  const users = userIds.length
+    ? await User.findAll({ where: { id: { [Op.in]: userIds } }, attributes: ['id', 'email', 'name'], raw: true })
+    : [];
+  const userMap = users.reduce((acc, user) => {
+    acc[user.id] = user;
+    return acc;
+  }, {});
+
+  return logs.map((log) => ({
+    ...log,
+    user_email: userMap[log.user_id]?.email || null,
+    user_name: userMap[log.user_id]?.name || null
+  }));
+};
+
+// Get audit logs (admin/manager)
+router.get('/logs', requireRole(['admin', 'manager']), async (req, res) => {
   try {
     const { page = 1, limit = 50, userId, action, startDate, endDate } = req.query;
-    const offset = (page - 1) * limit;
     const organizationId = req.user.organization_id;
 
-    let query = `
-      SELECT al.*, u.email as user_email 
-      FROM audit_logs al 
-      JOIN users u ON al.user_id = u.id 
-      WHERE al.organization_id = ?
-    `;
-    const params = [organizationId];
-
+    const query = { organization_id: organizationId };
     if (userId) {
-      query += ` AND al.user_id = ?`;
-      params.push(userId);
-    }
-
-    if (action) {
-      query += ` AND al.action LIKE ?`;
-      params.push(`%${action}%`);
-    }
-
-    if (startDate) {
-      query += ` AND al.created_at >= ?`;
-      params.push(startDate);
-    }
-
-    if (endDate) {
-      query += ` AND al.created_at <= ?`;
-      params.push(endDate);
-    }
-
-    query += ` ORDER BY al.created_at DESC LIMIT ? OFFSET ?`;
-    params.push(Number(limit), Number(offset));
-
-    const logs = db.prepare(query).all(...params).map((log) => ({
-      ...log,
-      details: (() => {
-        try {
-          return log.details ? JSON.parse(log.details) : null;
-        } catch (error) {
-          return log.details;
-        }
-      })()
-    }));
-
-    // Get total count
-    let countQuery = 'SELECT COUNT(*) as count FROM audit_logs WHERE organization_id = ?';
-    const countParams = [organizationId];
-    if (userId) {
-      countQuery += ` AND user_id = ?`;
-      countParams.push(userId);
+      query.user_id = userId;
     }
     if (action) {
-      countQuery += ` AND action LIKE ?`;
-      countParams.push(`%${action}%`);
+      query.action = { [Op.like]: `%${String(action)}%` };
     }
-    if (startDate) {
-      countQuery += ` AND created_at >= ?`;
-      countParams.push(startDate);
+    const dateFilter = buildDateFilter(startDate, endDate);
+    if (dateFilter) {
+      query.created_at = dateFilter;
     }
-    if (endDate) {
-      countQuery += ` AND created_at <= ?`;
-      countParams.push(endDate);
-    }
-    const countResult = db.prepare(countQuery).get(...countParams);
-    const totalCount = countResult.count;
+
+    const offset = (Number(page) - 1) * Number(limit);
+
+    const [logs, totalCount] = await Promise.all([
+      AuditLog.findAll({
+        where: query,
+        order: [['created_at', 'DESC']],
+        offset,
+        limit: Number(limit),
+        raw: true
+      }),
+      AuditLog.count({ where: query })
+    ]);
+
+    const mappedLogs = await mapUsers(logs);
 
     res.json({
-      logs,
+      logs: mappedLogs,
       pagination: {
         page: Number(page),
         limit: Number(limit),
         total: totalCount,
-        pages: Math.ceil(totalCount / limit)
+        pages: Math.ceil(totalCount / Number(limit))
       }
     });
   } catch (error) {
@@ -96,32 +87,27 @@ router.get('/my-logs', async (req, res) => {
     const userId = req.user.id;
     const organizationId = req.user.organization_id;
     const { page = 1, limit = 20 } = req.query;
-    const offset = (page - 1) * limit;
+    const offset = (Number(page) - 1) * Number(limit);
 
-    const logs = db.prepare(
-      'SELECT * FROM audit_logs WHERE user_id = ? AND organization_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?'
-    ).all(userId, organizationId, Number(limit), Number(offset))
-      .map((log) => ({
-        ...log,
-        details: (() => {
-          try {
-            return log.details ? JSON.parse(log.details) : null;
-          } catch (error) {
-            return log.details;
-          }
-        })()
-      }));
+    const [logs, totalCount] = await Promise.all([
+      AuditLog.findAll({
+        where: { user_id: userId, organization_id: organizationId },
+        order: [['created_at', 'DESC']],
+        offset,
+        limit: Number(limit),
+        raw: true
+      }),
+      AuditLog.count({ where: { user_id: userId, organization_id: organizationId } })
+    ]);
 
-    const countResult = db.prepare(
-      'SELECT COUNT(*) as count FROM audit_logs WHERE user_id = ? AND organization_id = ?'
-    ).get(userId, organizationId);
+    const mappedLogs = await mapUsers(logs);
 
     res.json({
-      logs,
+      logs: mappedLogs,
       pagination: {
         page: Number(page),
         limit: Number(limit),
-        total: countResult.count
+        total: totalCount
       }
     });
   } catch (error) {
@@ -131,60 +117,62 @@ router.get('/my-logs', async (req, res) => {
 });
 
 // Get audit statistics
-router.get('/stats', requireRole(['admin']), async (req, res) => {
+router.get('/stats', requireRole(['admin', 'manager']), async (req, res) => {
   try {
     const { timeframe = '7d' } = req.query;
     const organizationId = req.user.organization_id;
 
-    // SQLite doesn't support INTERVAL, so use date('now', '-X days')
-    let dateFilter = '';
-    switch (timeframe) {
-      case '24h':
-        dateFilter = "datetime(created_at) >= datetime('now', '-1 day')";
-        break;
-      case '7d':
-        dateFilter = "datetime(created_at) >= datetime('now', '-7 days')";
-        break;
-      case '30d':
-        dateFilter = "datetime(created_at) >= datetime('now', '-30 days')";
-        break;
-      default:
-        dateFilter = "datetime(created_at) >= datetime('now', '-7 days')";
+    let startDate = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    if (timeframe === '24h') {
+      startDate = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    } else if (timeframe === '30d') {
+      startDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
     }
 
-    // Get action counts
-    const actionStats = db.prepare(`
-      SELECT action, COUNT(*) as count 
-      FROM audit_logs 
-      WHERE organization_id = ? AND ${dateFilter}
-      GROUP BY action 
-      ORDER BY count DESC
-    `).all(organizationId);
+    const actionStats = await AuditLog.findAll({
+      where: { organization_id: organizationId, created_at: { [Op.gte]: startDate } },
+      attributes: ['action', [fn('COUNT', col('id')), 'count']],
+      group: ['action'],
+      order: [[fn('COUNT', col('id')), 'DESC']],
+      raw: true
+    });
 
-    // Get user activity
-    const userStats = db.prepare(`
-      SELECT u.email, COUNT(al.id) as action_count
-      FROM users u
-      LEFT JOIN audit_logs al ON u.id = al.user_id AND al.organization_id = ? AND ${dateFilter.replace('created_at', 'al.created_at')}
-      WHERE u.organization_id = ?
-      GROUP BY u.id, u.email
-      ORDER BY action_count DESC
-      LIMIT 10
-    `).all(organizationId, organizationId);
+    const userStatsRaw = await AuditLog.findAll({
+      where: { organization_id: organizationId, created_at: { [Op.gte]: startDate } },
+      attributes: ['user_id', [fn('COUNT', col('id')), 'action_count']],
+      group: ['user_id'],
+      order: [[fn('COUNT', col('id')), 'DESC']],
+      limit: 10,
+      raw: true
+    });
 
-    // Get daily activity
-    const dailyStats = db.prepare(`
-      SELECT DATE(created_at) as date, COUNT(*) as count
-      FROM audit_logs
-      WHERE organization_id = ? AND ${dateFilter}
-      GROUP BY DATE(created_at)
-      ORDER BY date DESC
-    `).all(organizationId);
+    const userIds = userStatsRaw.map((row) => row.user_id).filter(Boolean);
+    const users = userIds.length
+      ? await User.findAll({ where: { id: { [Op.in]: userIds } }, attributes: ['id', 'email', 'name'], raw: true })
+      : [];
+    const userMap = users.reduce((acc, user) => {
+      acc[user.id] = user;
+      return acc;
+    }, {});
+
+    const userStats = userStatsRaw.map((row) => ({
+      email: userMap[row.user_id]?.email || null,
+      name: userMap[row.user_id]?.name || null,
+      action_count: Number(row.action_count)
+    }));
+
+    const dailyStats = await AuditLog.findAll({
+      where: { organization_id: organizationId, created_at: { [Op.gte]: startDate } },
+      attributes: [[fn('DATE_FORMAT', col('created_at'), '%Y-%m-%d'), 'date'], [fn('COUNT', col('id')), 'count']],
+      group: [fn('DATE_FORMAT', col('created_at'), '%Y-%m-%d')],
+      order: [[fn('DATE_FORMAT', col('created_at'), '%Y-%m-%d'), 'DESC']],
+      raw: true
+    });
 
     res.json({
-      actionStats,
+      actionStats: actionStats.map((item) => ({ action: item.action, count: Number(item.count) })),
       userStats,
-      dailyStats
+      dailyStats: dailyStats.map((row) => ({ date: row.date, count: Number(row.count) }))
     });
   } catch (error) {
     console.error('Audit stats error:', error);
@@ -192,40 +180,33 @@ router.get('/stats', requireRole(['admin']), async (req, res) => {
   }
 });
 
-// Export audit logs to CSV (admin only)
-router.get('/export', requireRole(['admin']), async (req, res) => {
+// Export audit logs to CSV (admin/manager)
+router.get('/export', requireRole(['admin', 'manager']), async (req, res) => {
   try {
     const { action, startDate, endDate } = req.query;
     const organizationId = req.user.organization_id;
 
-    let query = `
-      SELECT al.*, u.email as user_email
-      FROM audit_logs al
-      JOIN users u ON al.user_id = u.id
-      WHERE al.organization_id = ?
-    `;
-    const params = [organizationId];
-
+    const query = { organization_id: organizationId };
     if (action) {
-      query += ` AND al.action LIKE ?`;
-      params.push(`%${action}%`);
+      query.action = { [Op.like]: `%${String(action)}%` };
     }
-    if (startDate) {
-      query += ` AND al.created_at >= ?`;
-      params.push(startDate);
-    }
-    if (endDate) {
-      query += ` AND al.created_at <= ?`;
-      params.push(endDate);
+    const dateFilter = buildDateFilter(startDate, endDate);
+    if (dateFilter) {
+      query.created_at = dateFilter;
     }
 
-    query += ' ORDER BY al.created_at DESC';
+    const logs = await AuditLog.findAll({
+      where: query,
+      order: [['created_at', 'DESC']],
+      raw: true
+    });
 
-    const logs = db.prepare(query).all(...params);
+    const mappedLogs = await mapUsers(logs);
 
-    const header = ['timestamp', 'user_email', 'action', 'resource_type', 'resource_id', 'ip_address', 'details'];
-    const rows = logs.map((log) => [
+    const header = ['timestamp', 'user_name', 'user_email', 'action', 'resource_type', 'resource_id', 'ip_address', 'details'];
+    const rows = mappedLogs.map((log) => [
       log.created_at,
+      log.user_name,
       log.user_email,
       log.action,
       log.resource_type,
@@ -239,7 +220,7 @@ router.get('/export', requireRole(['admin']), async (req, res) => {
       .join('\n');
 
     res.setHeader('Content-Type', 'text/csv');
-    res.setHeader('Content-Disposition', 'attachment; filename=\"audit-logs.csv\"');
+    res.setHeader('Content-Disposition', 'attachment; filename="audit-logs.csv"');
     res.send(csv);
   } catch (error) {
     console.error('Audit export error:', error);

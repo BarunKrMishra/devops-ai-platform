@@ -1,5 +1,6 @@
 import express from 'express';
-import { db } from '../database/init.js';
+import { Op, fn, col } from 'sequelize';
+import { Template, User } from '../models/index.js';
 import { requireRole } from '../middleware/auth.js';
 import { logAuditAction } from '../utils/audit.js';
 
@@ -12,37 +13,60 @@ router.get('/', async (req, res) => {
     const userId = req.user.id;
     const organizationId = req.user.organization_id;
 
-    let query = `
-      SELECT t.*, u.name as created_by_name 
-      FROM templates t 
-      LEFT JOIN users u ON t.created_by = u.id 
-      WHERE (t.is_public = 1 OR t.organization_id = ? OR t.created_by = ?)
-    `;
-    const params = [organizationId, userId];
+    const filters = {
+      [Op.or]: [
+        { is_public: true },
+        { organization_id: organizationId },
+        { created_by: userId }
+      ]
+    };
 
     if (category) {
-      query += ` AND t.category = ?`;
-      params.push(category);
+      filters.category = category;
     }
 
     if (search) {
-      query += ` AND (t.name LIKE ? OR t.description LIKE ?)`;
-      params.push(`%${search}%`, `%${search}%`);
+      filters[Op.and] = [
+        {
+          [Op.or]: [
+            { name: { [Op.like]: `%${search}%` } },
+            { description: { [Op.like]: `%${search}%` } }
+          ]
+        }
+      ];
     }
 
     if (public_only === 'true') {
-      query += ` AND t.is_public = 1`;
+      filters.is_public = true;
     }
 
-    query += ` ORDER BY t.downloads DESC, t.created_at DESC`;
+    const templates = await Template.findAll({
+      where: filters,
+      order: [['downloads', 'DESC'], ['created_at', 'DESC']],
+      raw: true
+    });
 
-    const templates = db.prepare(query).all(...params);
+    const userIds = Array.from(new Set(templates.map((template) => template.created_by).filter(Boolean)));
+    const users = userIds.length
+      ? await User.findAll({
+          where: { id: { [Op.in]: userIds } },
+          attributes: ['id', 'name'],
+          raw: true
+        })
+      : [];
+    const usersById = users.reduce((acc, user) => {
+      acc[user.id] = user.name;
+      return acc;
+    }, {});
 
-    res.json(templates.map(template => ({
-      ...template,
-      template_data: JSON.parse(template.template_data),
-      tags: JSON.parse(template.tags)
-    })));
+    res.json(
+      templates.map((template) => ({
+        ...template,
+        created_by_name: usersById[template.created_by] || null,
+        template_data: template.template_data || {},
+        tags: template.tags || []
+      }))
+    );
   } catch (error) {
     console.error('Templates fetch error:', error);
     res.status(500).json({ error: 'Failed to fetch templates' });
@@ -56,24 +80,33 @@ router.get('/:id', async (req, res) => {
     const userId = req.user.id;
     const organizationId = req.user.organization_id;
 
-    const template = db.prepare(`
-      SELECT t.*, u.name as created_by_name 
-      FROM templates t 
-      LEFT JOIN users u ON t.created_by = u.id 
-      WHERE t.id = ? AND (t.is_public = 1 OR t.organization_id = ? OR t.created_by = ?)
-    `).get(id, organizationId, userId);
+    const template = await Template.findOne({
+      where: {
+        id,
+        [Op.or]: [
+          { is_public: true },
+          { organization_id: organizationId },
+          { created_by: userId }
+        ]
+      },
+      raw: true
+    });
 
     if (!template) {
       return res.status(404).json({ error: 'Template not found' });
     }
 
-    // Increment download count
-    db.prepare('UPDATE templates SET downloads = downloads + 1 WHERE id = ?').run(id);
+    await Template.increment('downloads', { where: { id } });
+
+    const createdBy = template.created_by
+      ? await User.findByPk(template.created_by, { attributes: ['name'], raw: true })
+      : null;
 
     res.json({
       ...template,
-      template_data: JSON.parse(template.template_data),
-      tags: JSON.parse(template.tags)
+      created_by_name: createdBy?.name || null,
+      template_data: template.template_data || {},
+      tags: template.tags || []
     });
   } catch (error) {
     console.error('Template fetch error:', error);
@@ -88,27 +121,24 @@ router.post('/', async (req, res) => {
     const userId = req.user.id;
     const organizationId = req.user.organization_id;
 
-    const result = db.prepare(`
-      INSERT INTO templates (name, description, category, template_data, is_public, created_by, organization_id, tags)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
+    const template = await Template.create({
       name,
       description,
       category,
-      JSON.stringify(template_data),
-      is_public || false,
-      userId,
-      organizationId,
-      JSON.stringify(tags || [])
-    );
+      template_data: template_data || {},
+      is_public: Boolean(is_public),
+      created_by: userId,
+      organization_id: organizationId,
+      tags: tags || []
+    });
 
-    await logAuditAction(userId, 'CREATE_TEMPLATE', 'template', result.lastInsertRowid, {
+    await logAuditAction(userId, 'CREATE_TEMPLATE', 'template', template.id, {
       name,
       category,
       is_public
     });
 
-    res.json({ id: result.lastInsertRowid, message: 'Template created successfully' });
+    res.json({ id: template.id, message: 'Template created successfully' });
   } catch (error) {
     console.error('Template creation error:', error);
     res.status(500).json({ error: 'Failed to create template' });
@@ -122,24 +152,21 @@ router.put('/:id', async (req, res) => {
     const { name, description, category, template_data, is_public, tags } = req.body;
     const userId = req.user.id;
 
-    // Check if user owns the template or is admin
-    const template = db.prepare('SELECT * FROM templates WHERE id = ? AND created_by = ?').get(id, userId);
+    const template = await Template.findOne({ where: { id, created_by: userId }, raw: true });
     if (!template) {
       return res.status(404).json({ error: 'Template not found or access denied' });
     }
 
-    db.prepare(`
-      UPDATE templates 
-      SET name = ?, description = ?, category = ?, template_data = ?, is_public = ?, tags = ?, updated_at = CURRENT_TIMESTAMP
-      WHERE id = ?
-    `).run(
-      name,
-      description,
-      category,
-      JSON.stringify(template_data),
-      is_public,
-      JSON.stringify(tags || []),
-      id
+    await Template.update(
+      {
+        name,
+        description,
+        category,
+        template_data: template_data || {},
+        is_public: Boolean(is_public),
+        tags: tags || []
+      },
+      { where: { id } }
     );
 
     await logAuditAction(userId, 'UPDATE_TEMPLATE', 'template', id, {
@@ -161,13 +188,12 @@ router.delete('/:id', async (req, res) => {
     const { id } = req.params;
     const userId = req.user.id;
 
-    // Check if user owns the template or is admin
-    const template = db.prepare('SELECT * FROM templates WHERE id = ? AND created_by = ?').get(id, userId);
+    const template = await Template.findOne({ where: { id, created_by: userId }, raw: true });
     if (!template) {
       return res.status(404).json({ error: 'Template not found or access denied' });
     }
 
-    db.prepare('DELETE FROM templates WHERE id = ?').run(id);
+    await Template.destroy({ where: { id } });
 
     await logAuditAction(userId, 'DELETE_TEMPLATE', 'template', id, {
       name: template.name
@@ -183,13 +209,16 @@ router.delete('/:id', async (req, res) => {
 // Get template categories
 router.get('/meta/categories', async (req, res) => {
   try {
-    const categories = db.prepare(`
-      SELECT category, COUNT(*) as count 
-      FROM templates 
-      WHERE is_public = 1 OR organization_id = ? 
-      GROUP BY category 
-      ORDER BY count DESC
-    `).all(req.user.organization_id);
+    const organizationId = req.user.organization_id;
+    const categories = await Template.findAll({
+      where: {
+        [Op.or]: [{ is_public: true }, { organization_id: organizationId }]
+      },
+      attributes: ['category', [fn('COUNT', col('id')), 'count']],
+      group: ['category'],
+      order: [[fn('COUNT', col('id')), 'DESC']],
+      raw: true
+    });
 
     res.json(categories);
   } catch (error) {

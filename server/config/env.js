@@ -27,6 +27,14 @@ const requireEnv = (key) => {
 const validateSecrets = () => {
   requireEnv('JWT_SECRET');
   requireEnv('INTEGRATION_MASTER_KEY');
+  // MySQL connection details are only required when actually using MySQL.
+  // SQLite (DB_DIALECT=sqlite) is self-contained and needs no host/user/db.
+  const usingSqlite = String(process.env.DB_DIALECT || '').toLowerCase().trim() === 'sqlite';
+  if (!usingSqlite && !process.env.MYSQL_URL) {
+    requireEnv('MYSQL_HOST');
+    requireEnv('MYSQL_USER');
+    requireEnv('MYSQL_DATABASE');
+  }
 
   const jwtSecret = process.env.JWT_SECRET || '';
   if (jwtSecret && jwtSecret.length < 24) {

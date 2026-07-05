@@ -1,5 +1,6 @@
 import express from 'express';
-import { db } from '../database/init.js';
+import { Op } from 'sequelize';
+import { Notification } from '../models/index.js';
 import { io } from '../index.js';
 
 const router = express.Router();
@@ -11,26 +12,30 @@ router.get('/', async (req, res) => {
     const organizationId = req.user.organization_id;
     const { unread_only, limit = 50 } = req.query;
 
-    let query = `
-      SELECT * FROM notifications 
-      WHERE (user_id = ? OR organization_id = ?) 
-      AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)
-    `;
-    const params = [userId, organizationId];
+    const filters = {
+      [Op.and]: [
+        { [Op.or]: [{ user_id: userId }, { organization_id: organizationId }] },
+        { [Op.or]: [{ expires_at: null }, { expires_at: { [Op.gt]: new Date() } }] }
+      ]
+    };
 
     if (unread_only === 'true') {
-      query += ` AND read = 0`;
+      filters[Op.and].push({ read: false });
     }
 
-    query += ` ORDER BY priority DESC, created_at DESC LIMIT ?`;
-    params.push(parseInt(limit));
+    const notifications = await Notification.findAll({
+      where: filters,
+      order: [['priority', 'DESC'], ['created_at', 'DESC']],
+      limit: Number(limit) || 50,
+      raw: true
+    });
 
-    const notifications = db.prepare(query).all(...params);
-
-    res.json(notifications.map(notification => ({
-      ...notification,
-      data: JSON.parse(notification.data)
-    })));
+    res.json(
+      notifications.map((notification) => ({
+        ...notification,
+        data: notification.data || {}
+      }))
+    );
   } catch (error) {
     console.error('Notifications fetch error:', error);
     res.status(500).json({ error: 'Failed to fetch notifications' });
@@ -43,13 +48,12 @@ router.put('/:id/read', async (req, res) => {
     const { id } = req.params;
     const userId = req.user.id;
 
-    const result = db.prepare(`
-      UPDATE notifications 
-      SET read = 1 
-      WHERE id = ? AND user_id = ?
-    `).run(id, userId);
+    const result = await Notification.update(
+      { read: true },
+      { where: { id, user_id: userId } }
+    );
 
-    if (result.changes === 0) {
+    if (result[0] === 0) {
       return res.status(404).json({ error: 'Notification not found' });
     }
 
@@ -66,11 +70,10 @@ router.put('/read-all', async (req, res) => {
     const userId = req.user.id;
     const organizationId = req.user.organization_id;
 
-    db.prepare(`
-      UPDATE notifications 
-      SET read = 1 
-      WHERE (user_id = ? OR organization_id = ?) AND read = 0
-    `).run(userId, organizationId);
+    await Notification.update(
+      { read: true },
+      { where: { [Op.or]: [{ user_id: userId }, { organization_id: organizationId }], read: false } }
+    );
 
     res.json({ message: 'All notifications marked as read' });
   } catch (error) {
@@ -93,26 +96,22 @@ export const createNotification = async (data) => {
       expires_at
     } = data;
 
-    const result = db.prepare(`
-      INSERT INTO notifications (user_id, organization_id, type, title, message, data, priority, expires_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      user_id,
-      organization_id,
+    const notificationDoc = await Notification.create({
+      user_id: user_id || undefined,
+      organization_id: organization_id || undefined,
       type,
       title,
       message,
-      JSON.stringify(notificationData),
+      data: notificationData,
       priority,
-      expires_at
-    );
+      expires_at: expires_at || null,
+      read: false
+    });
 
     const notification = {
-      id: result.lastInsertRowid,
-      ...data,
+      ...notificationDoc.get({ plain: true }),
       data: notificationData,
-      read: false,
-      created_at: new Date().toISOString()
+      read: false
     };
 
     // Send real-time notification
@@ -136,12 +135,9 @@ router.delete('/:id', async (req, res) => {
     const { id } = req.params;
     const userId = req.user.id;
 
-    const result = db.prepare(`
-      DELETE FROM notifications 
-      WHERE id = ? AND user_id = ?
-    `).run(id, userId);
+    const result = await Notification.destroy({ where: { id, user_id: userId } });
 
-    if (result.changes === 0) {
+    if (result === 0) {
       return res.status(404).json({ error: 'Notification not found' });
     }
 
@@ -158,17 +154,24 @@ router.get('/stats', async (req, res) => {
     const userId = req.user.id;
     const organizationId = req.user.organization_id;
 
-    const stats = db.prepare(`
-      SELECT 
-        COUNT(*) as total,
-        SUM(CASE WHEN read = 0 THEN 1 ELSE 0 END) as unread,
-        SUM(CASE WHEN priority = 'high' AND read = 0 THEN 1 ELSE 0 END) as high_priority_unread
-      FROM notifications 
-      WHERE (user_id = ? OR organization_id = ?)
-      AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)
-    `).get(userId, organizationId);
+    const baseFilters = {
+      [Op.and]: [
+        { [Op.or]: [{ user_id: userId }, { organization_id: organizationId }] },
+        { [Op.or]: [{ expires_at: null }, { expires_at: { [Op.gt]: new Date() } }] }
+      ]
+    };
 
-    res.json(stats);
+    const [total, unread, highPriorityUnread] = await Promise.all([
+      Notification.count({ where: baseFilters }),
+      Notification.count({ where: { ...baseFilters, read: false } }),
+      Notification.count({ where: { ...baseFilters, read: false, priority: 'high' } })
+    ]);
+
+    res.json({
+      total,
+      unread,
+      high_priority_unread: highPriorityUnread
+    });
   } catch (error) {
     console.error('Notification stats error:', error);
     res.status(500).json({ error: 'Failed to fetch notification stats' });

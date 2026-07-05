@@ -1,5 +1,5 @@
 import express from 'express';
-import { db } from '../database/init.js';
+import { OnboardingProfile, OnboardingSetting, GoLiveRequest, User } from '../models/index.js';
 import { createEmailTransport } from '../utils/email.js';
 
 const router = express.Router();
@@ -16,62 +16,13 @@ const parseList = (value) => {
   return [];
 };
 
-const integrationFieldMap = {
-  'CI/CD': [
-    { key: 'vcs_access', label: 'GitHub/GitLab access' },
-    { key: 'build_secrets', label: 'Build secrets' },
-    { key: 'deployment_target', label: 'Deployment target (Kubernetes/VM/Serverless)' }
-  ],
-  Infrastructure: [
-    { key: 'cloud_credentials', label: 'Cloud account credentials' },
-    { key: 'region_preferences', label: 'Region preferences' },
-    { key: 'infra_templates', label: 'Infrastructure templates' }
-  ],
-  Monitoring: [
-    { key: 'metrics_endpoint', label: 'Metrics endpoint' },
-    { key: 'alert_channels', label: 'Alert channels' },
-    { key: 'incident_routing', label: 'Incident routing' }
-  ],
-  Templates: [
-    { key: 'template_library_access', label: 'Template library access' },
-    { key: 'env_variables', label: 'Environment variables' },
-    { key: 'approval_workflow', label: 'Approval workflow' }
-  ],
-  Team: [
-    { key: 'team_roster', label: 'Team roster' },
-    { key: 'role_mapping', label: 'Role mapping' },
-    { key: 'sso_policy', label: 'SSO or invite policy' }
-  ],
-  Analytics: [
-    { key: 'usage_metrics', label: 'Usage metrics' },
-    { key: 'cost_reports', label: 'Cost reports' },
-    { key: 'data_retention', label: 'Data retention policy' }
-  ],
-  Audit: [
-    { key: 'audit_retention', label: 'Audit retention policy' },
-    { key: 'export_destination', label: 'Export destination' },
-    { key: 'compliance_scope', label: 'Compliance scope' }
-  ],
-  Settings: [
-    { key: 'org_defaults', label: 'Org defaults' },
-    { key: 'security_policies', label: 'Security policies' },
-    { key: 'integration_owners', label: 'Integration owners' }
-  ]
-};
-
-const getOrgSettings = (orgId) => {
-  const settings = db.prepare(
-    'SELECT demo_mode FROM organization_settings WHERE organization_id = ?'
-  ).get(orgId);
-
+const getOrgSettings = async (orgId) => {
+  const settings = await OnboardingSetting.findOne({ where: { organization_id: orgId }, raw: true });
   if (settings) {
     return { demo_mode: Boolean(settings.demo_mode) };
   }
 
-  db.prepare(
-    'INSERT INTO organization_settings (organization_id, demo_mode) VALUES (?, 1)'
-  ).run(orgId);
-
+  await OnboardingSetting.create({ organization_id: orgId, demo_mode: true });
   return { demo_mode: true };
 };
 
@@ -208,16 +159,10 @@ const sendGoLiveEmail = async (payload) => {
   });
 };
 
-router.get('/status', (req, res) => {
+router.get('/status', async (req, res) => {
   const orgId = req.user.organization_id;
-  const settings = getOrgSettings(orgId);
-  const profile = db.prepare(
-    `SELECT account_type, organization_name, company_domain, team_size, role,
-            use_cases, clouds, security_requirements, security_contact_email,
-            ai_integration, ai_provider, ai_integration_method, ai_integration_notes,
-            consent_terms, consent_privacy, created_at, updated_at
-     FROM onboarding_profiles WHERE organization_id = ?`
-  ).get(orgId);
+  const settings = await getOrgSettings(orgId);
+  const profile = await OnboardingProfile.findOne({ where: { organization_id: orgId }, raw: true });
 
   if (!profile) {
     return res.json({ completed: false, demo_mode: settings.demo_mode });
@@ -228,9 +173,6 @@ router.get('/status', (req, res) => {
     demo_mode: settings.demo_mode,
     profile: {
       ...profile,
-      use_cases: JSON.parse(profile.use_cases || '[]'),
-      clouds: JSON.parse(profile.clouds || '[]'),
-      security_requirements: JSON.parse(profile.security_requirements || '[]'),
       consent_terms: Boolean(profile.consent_terms),
       consent_privacy: Boolean(profile.consent_privacy),
       ai_integration: Boolean(profile.ai_integration)
@@ -260,8 +202,8 @@ router.post('/', async (req, res) => {
     consent_privacy
   } = req.body;
 
-  if (!account_type || !team_size || !role) {
-    return res.status(400).json({ error: 'Account type, team size, and role are required.' });
+  if (!account_type) {
+    return res.status(400).json({ error: 'Account type is required.' });
   }
 
   if (!organization_name) {
@@ -272,160 +214,84 @@ router.post('/', async (req, res) => {
     return res.status(400).json({ error: 'Company domain is required.' });
   }
 
-  if (!/^[^\s@]+\.[^\s@]+$/.test(company_domain)) {
-    return res.status(400).json({ error: 'Company domain is invalid.' });
+  if (!team_size || !role) {
+    return res.status(400).json({ error: 'Team size and role are required.' });
   }
 
-  if (!security_contact_email) {
-    return res.status(400).json({ error: 'Security contact email is required.' });
+  const useCaseList = parseList(use_cases);
+  if (useCaseList.length === 0) {
+    return res.status(400).json({ error: 'Select at least one use case.' });
   }
 
-  if (!isValidEmail(security_contact_email)) {
-    return res.status(400).json({ error: 'Security contact email is invalid.' });
+  const cloudList = parseList(clouds);
+  if (cloudList.length === 0) {
+    return res.status(400).json({ error: 'Select at least one primary cloud.' });
+  }
+
+  const securityList = parseList(security_requirements);
+  if (securityList.length === 0) {
+    return res.status(400).json({ error: 'Select at least one security requirement.' });
+  }
+
+  if (!security_contact_email || !isValidEmail(security_contact_email)) {
+    return res.status(400).json({ error: 'Valid security contact email is required.' });
   }
 
   if (!consent_terms || !consent_privacy) {
-    return res.status(400).json({ error: 'Terms and privacy consent are required.' });
+    return res.status(400).json({ error: 'Please accept the terms and privacy policy.' });
   }
 
-  const parsedUseCases = parseList(use_cases);
-  const parsedClouds = parseList(clouds);
-  const parsedSecurity = parseList(security_requirements);
+  const payload = {
+    organization_id: orgId,
+    account_type,
+    organization_name,
+    company_domain,
+    team_size,
+    role,
+    use_cases: useCaseList,
+    clouds: cloudList,
+    security_requirements: securityList,
+    security_contact_email,
+    ai_integration: Boolean(ai_integration),
+    ai_provider: ai_provider || null,
+    ai_integration_method: ai_integration_method || null,
+    ai_integration_notes: ai_integration_notes || null,
+    consent_terms: Boolean(consent_terms),
+    consent_privacy: Boolean(consent_privacy)
+  };
 
-  if (parsedUseCases.length === 0) {
-    return res.status(400).json({ error: 'At least one use case is required.' });
-  }
-
-  if (parsedClouds.length === 0) {
-    return res.status(400).json({ error: 'At least one primary cloud is required.' });
-  }
-
-  if (parsedSecurity.length === 0) {
-    return res.status(400).json({ error: 'At least one security requirement is required.' });
-  }
-  const wantsAi = Boolean(ai_integration);
-
-  const existing = db.prepare('SELECT id FROM onboarding_profiles WHERE organization_id = ?').get(orgId);
-
+  const existing = await OnboardingProfile.findOne({ where: { organization_id: orgId } });
   if (existing) {
-    db.prepare(
-      `UPDATE onboarding_profiles
-       SET account_type = ?,
-           organization_name = ?,
-           company_domain = ?,
-           team_size = ?,
-           role = ?,
-           use_cases = ?,
-           clouds = ?,
-           security_requirements = ?,
-           security_contact_email = ?,
-           ai_integration = ?,
-           ai_provider = ?,
-           ai_integration_method = ?,
-           ai_integration_notes = ?,
-           consent_terms = ?,
-           consent_privacy = ?,
-           updated_at = CURRENT_TIMESTAMP
-       WHERE organization_id = ?`
-    ).run(
-      account_type,
-      organization_name,
-      company_domain,
-      team_size,
-      role,
-      JSON.stringify(parsedUseCases),
-      JSON.stringify(parsedClouds),
-      JSON.stringify(parsedSecurity),
-      security_contact_email,
-      wantsAi ? 1 : 0,
-      ai_provider,
-      ai_integration_method,
-      ai_integration_notes,
-      consent_terms ? 1 : 0,
-      consent_privacy ? 1 : 0,
-      orgId
-    );
+    await OnboardingProfile.update(payload, { where: { organization_id: orgId } });
   } else {
-    db.prepare(
-      `INSERT INTO onboarding_profiles
-       (organization_id, user_id, account_type, organization_name, company_domain, team_size, role,
-        use_cases, clouds, security_requirements, security_contact_email,
-        ai_integration, ai_provider, ai_integration_method, ai_integration_notes,
-        consent_terms, consent_privacy)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(
-      orgId,
-      userId,
-      account_type,
-      organization_name,
-      company_domain,
-      team_size,
-      role,
-      JSON.stringify(parsedUseCases),
-      JSON.stringify(parsedClouds),
-      JSON.stringify(parsedSecurity),
-      security_contact_email,
-      wantsAi ? 1 : 0,
-      ai_provider,
-      ai_integration_method,
-      ai_integration_notes,
-      consent_terms ? 1 : 0,
-      consent_privacy ? 1 : 0
-    );
+    await OnboardingProfile.create(payload);
   }
 
-  try {
-    await sendOnboardingEmail({
-      account_type,
-      organization_name,
-      company_domain,
-      team_size,
-      role,
-      use_cases: parsedUseCases,
-      clouds: parsedClouds,
-      security_requirements: parsedSecurity,
-      security_contact_email,
-      ai_integration: wantsAi,
-      ai_provider,
-      ai_integration_method,
-      ai_integration_notes
-    });
-  } catch (error) {
-    console.error('Onboarding email failed:', error);
-    return res.status(500).json({ error: 'Failed to send onboarding email. Please try again.' });
-  }
+  await sendOnboardingEmail(payload);
 
-  return res.json({ completed: true });
+  await User.update({ updated_at: new Date() }, { where: { id: userId } });
+
+  res.json({ message: 'Onboarding details saved.' });
 });
 
-router.patch('/settings', (req, res) => {
+router.patch('/settings', async (req, res) => {
   const orgId = req.user.organization_id;
-  const { demo_mode } = req.body;
+  const { demo_mode } = req.body || {};
 
-  if (typeof demo_mode !== 'boolean') {
-    return res.status(400).json({ error: 'demo_mode must be a boolean.' });
-  }
-
-  const existing = db.prepare(
-    'SELECT id FROM organization_settings WHERE organization_id = ?'
-  ).get(orgId);
-
+  const existing = await OnboardingSetting.findOne({ where: { organization_id: orgId } });
   if (existing) {
-    db.prepare(
-      'UPDATE organization_settings SET demo_mode = ?, updated_at = CURRENT_TIMESTAMP WHERE organization_id = ?'
-    ).run(demo_mode ? 1 : 0, orgId);
+    await OnboardingSetting.update({ demo_mode: Boolean(demo_mode) }, { where: { organization_id: orgId } });
   } else {
-    db.prepare(
-      'INSERT INTO organization_settings (organization_id, demo_mode) VALUES (?, ?)'
-    ).run(orgId, demo_mode ? 1 : 0);
+    await OnboardingSetting.create({ organization_id: orgId, demo_mode: Boolean(demo_mode) });
   }
 
-  return res.json({ demo_mode });
+  res.json({ message: 'Settings updated.' });
 });
 
 router.post('/request-live', async (req, res) => {
   const orgId = req.user.organization_id;
   const userId = req.user.id;
+
   const {
     requirements_notes,
     contact_email,
@@ -436,115 +302,53 @@ router.post('/request-live', async (req, res) => {
     selected_features,
     data_sources,
     live_data_notes
-  } = req.body;
+  } = req.body || {};
 
-  if (!requirements_notes || !requirements_notes.trim()) {
-    return res.status(400).json({ error: 'Go-live requirements are required.' });
+  if (!requirements_notes || !contact_email) {
+    return res.status(400).json({ error: 'Requirements notes and contact email are required.' });
   }
 
-  if (!contact_email || !isValidEmail(contact_email)) {
-    return res.status(400).json({ error: 'A valid contact email is required.' });
+  if (!isValidEmail(contact_email)) {
+    return res.status(400).json({ error: 'Contact email is invalid.' });
   }
 
-  const selectedFeatures = parseList(selected_features);
-  if (selectedFeatures.length === 0) {
-    return res.status(400).json({ error: 'Select at least one feature to enable.' });
-  }
-
-  const dataSources = parseList(data_sources);
-
-  const profile = db.prepare(
-    `SELECT account_type, organization_name, company_domain, team_size, role,
-            use_cases, clouds, security_requirements, security_contact_email,
-            ai_integration, ai_provider, ai_integration_method, ai_integration_notes
-     FROM onboarding_profiles WHERE organization_id = ?`
-  ).get(orgId);
-
+  const profile = await OnboardingProfile.findOne({ where: { organization_id: orgId }, raw: true });
   if (!profile) {
-    return res.status(400).json({ error: 'Complete onboarding before requesting go-live.' });
+    return res.status(400).json({ error: 'Complete onboarding before requesting live data.' });
   }
 
-  const requester = db.prepare('SELECT email FROM users WHERE id = ?').get(userId);
-  const wantsAi = typeof ai_integration === 'boolean' ? ai_integration : Boolean(profile.ai_integration);
+  const requester = await User.findByPk(userId, { attributes: ['email', 'name'], raw: true });
 
-  if (wantsAi && (!ai_provider || !ai_integration_method)) {
-    return res.status(400).json({ error: 'AI provider and integration method are required.' });
-  }
+  const requestPayload = {
+    organization_id: orgId,
+    requester_id: userId,
+    requirements_notes,
+    contact_email,
+    ai_integration: Boolean(ai_integration),
+    ai_provider: ai_provider || null,
+    ai_integration_method: ai_integration_method || null,
+    ai_integration_notes: ai_integration_notes || null,
+    selected_features: parseList(selected_features),
+    data_sources: parseList(data_sources),
+    live_data_notes: live_data_notes || null
+  };
 
-  const storedAiProvider = ai_provider || profile.ai_provider || null;
-  const storedAiMethod = ai_integration_method || profile.ai_integration_method || null;
-  const storedAiNotes = ai_integration_notes || profile.ai_integration_notes || null;
+  await GoLiveRequest.create(requestPayload);
 
-  try {
-    db.prepare(
-      `INSERT INTO go_live_requests
-       (organization_id, user_id, selected_features, requirements_notes, contact_email,
-        ai_integration, ai_provider, ai_integration_method, ai_integration_notes,
-        data_sources, live_data_notes, integration_details, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(
-      orgId,
-      userId,
-      JSON.stringify(selectedFeatures),
-      requirements_notes,
-      contact_email,
-      wantsAi ? 1 : 0,
-      storedAiProvider,
-      storedAiMethod,
-      storedAiNotes,
-      JSON.stringify(dataSources),
-      live_data_notes || null,
-      JSON.stringify({}),
-      'new'
-    );
-  } catch (error) {
-    console.error('Go-live request storage failed:', error);
-    return res.status(500).json({ error: 'Failed to store go-live request.' });
-  }
+  await sendGoLiveEmail({
+    ...profile,
+    ...requestPayload,
+    requested_by: requester?.email || 'Unknown'
+  });
 
-  const existingSettings = db.prepare(
-    'SELECT id FROM organization_settings WHERE organization_id = ?'
-  ).get(orgId);
-
-  if (existingSettings) {
-    db.prepare(
-      'UPDATE organization_settings SET demo_mode = 0, updated_at = CURRENT_TIMESTAMP WHERE organization_id = ?'
-    ).run(orgId);
+  const settings = await OnboardingSetting.findOne({ where: { organization_id: orgId } });
+  if (settings) {
+    await OnboardingSetting.update({ demo_mode: false }, { where: { organization_id: orgId } });
   } else {
-    db.prepare(
-      'INSERT INTO organization_settings (organization_id, demo_mode) VALUES (?, 0)'
-    ).run(orgId);
+    await OnboardingSetting.create({ organization_id: orgId, demo_mode: false });
   }
 
-  try {
-    await sendGoLiveEmail({
-      requested_by: requester?.email || 'Unknown',
-      account_type: profile.account_type,
-      organization_name: profile.organization_name,
-      company_domain: profile.company_domain,
-      team_size: profile.team_size,
-      role: profile.role,
-      use_cases: JSON.parse(profile.use_cases || '[]'),
-      clouds: JSON.parse(profile.clouds || '[]'),
-      security_requirements: JSON.parse(profile.security_requirements || '[]'),
-      security_contact_email: profile.security_contact_email,
-      ai_integration: wantsAi,
-      ai_provider: storedAiProvider,
-      ai_integration_method: storedAiMethod,
-      ai_integration_notes: storedAiNotes,
-      selected_features: selectedFeatures,
-      data_sources: dataSources,
-      live_data_notes,
-      requirements_notes,
-      contact_email,
-      integration_details: {}
-    });
-  } catch (error) {
-    console.error('Go-live email failed:', error);
-    return res.status(500).json({ error: 'Failed to send go-live request.' });
-  }
-
-  return res.json({ sent: true });
+  res.json({ message: 'Live data request submitted.' });
 });
 
 export default router;

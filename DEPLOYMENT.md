@@ -59,7 +59,14 @@ cp .env.example .env
 NODE_ENV=production
 PORT=3001
 JWT_SECRET=<strong-random-string>
-DATABASE_PATH=/path/to/production/database.db
+MYSQL_URL=mysql://user:password@db-host:3306/aikya
+# or
+MYSQL_HOST=db-host
+MYSQL_PORT=3306
+MYSQL_USER=your_user
+MYSQL_PASSWORD=your_password
+MYSQL_DATABASE=aikya
+MYSQL_SSL=true
 API_URL=https://your-domain.com
 VITE_API_URL=https://your-domain.com
 CORS_ORIGIN=https://your-domain.com
@@ -190,9 +197,9 @@ pm2 stop ai-devops-platform
 2. Restore from backup:
 ```bash
 # Restore database
-cp /path/to/backups/latest-backup.db.gz .
-gunzip latest-backup.db.gz
-mv latest-backup.db devops_ai.db
+cp /path/to/backups/latest-backup.sql.gz .
+gunzip latest-backup.sql.gz
+mysql -h <db-host> -u <db-user> -p < latest-backup.sql
 ```
 
 3. Switch to previous version:

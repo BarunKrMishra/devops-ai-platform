@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { getApiErrorMessage } from '../../utils/apiError';
 
 const ForgotPasswordPage: React.FC = () => {
   const [step, setStep] = useState(1);
@@ -71,7 +72,7 @@ const ForgotPasswordPage: React.FC = () => {
         // Try to parse JSON
         data = JSON.parse(responseText);
         console.log('Successfully parsed JSON:', data);
-      } catch (parseError: any) {
+      } catch (parseError) {
         console.error('Failed to parse JSON response:', parseError);
         console.error('Response text that failed to parse:', responseText);
         console.error('Response headers:', Object.fromEntries(res.headers.entries()));
@@ -82,7 +83,7 @@ const ForgotPasswordPage: React.FC = () => {
         } else if (responseText && responseText.includes('Cannot GET') || responseText.includes('Cannot POST')) {
           throw new Error('API endpoint not found. Please check if the server is running correctly.');
         } else {
-          throw new Error(`Server returned invalid response format: ${parseError.message}`);
+          throw new Error(`Server returned invalid response format: ${getApiErrorMessage(parseError)}`);
         }
       }
       
@@ -99,9 +100,9 @@ const ForgotPasswordPage: React.FC = () => {
         setSuccess('OTP sent to your email.');
       }
       setStep(2);
-    } catch (err: any) {
+    } catch (err) {
       console.error('Error in handleRequestOtp:', err);
-      setError(err.message);
+      setError(getApiErrorMessage(err));
     } finally {
       setLoading(false);
     }
@@ -132,8 +133,8 @@ const ForgotPasswordPage: React.FC = () => {
       if (!res.ok) throw new Error((data && data.error) || 'Unexpected server error');
       setSuccess('OTP verified. Please enter your new password.');
       setStep(3);
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err) {
+      setError(getApiErrorMessage(err));
     } finally {
       setLoading(false);
     }
@@ -164,8 +165,8 @@ const ForgotPasswordPage: React.FC = () => {
       if (!res.ok) throw new Error((data && data.error) || 'Unexpected server error');
       setSuccess('Password reset successful! You can now log in.');
       setStep(4);
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err) {
+      setError(getApiErrorMessage(err));
     } finally {
       setLoading(false);
     }
@@ -220,9 +221,9 @@ const ForgotPasswordPage: React.FC = () => {
                         const data = await res.json();
                         console.log('Health check result:', data);
                         alert(`Health check: ${res.status} - ${JSON.stringify(data, null, 2)}`);
-                      } catch (err: any) {
+                      } catch (err) {
                         console.error('Health check failed:', err);
-                        alert(`Health check failed: ${err.message}`);
+                        alert(`Health check failed: ${getApiErrorMessage(err)}`);
                       }
                     }}
                     className="w-full py-2 bg-yellow-500/20 border border-yellow-500/30 rounded text-yellow-300 text-sm"
@@ -239,9 +240,9 @@ const ForgotPasswordPage: React.FC = () => {
                         const data = await res.json();
                         console.log('Direct health check result:', data);
                         alert(`Direct health check: ${res.status} - ${JSON.stringify(data, null, 2)}`);
-                      } catch (err: any) {
+                      } catch (err) {
                         console.error('Direct health check failed:', err);
-                        alert(`Direct health check failed: ${err.message}`);
+                        alert(`Direct health check failed: ${getApiErrorMessage(err)}`);
                       }
                     }}
                     className="w-full py-2 bg-orange-500/20 border border-orange-500/30 rounded text-orange-300 text-sm"

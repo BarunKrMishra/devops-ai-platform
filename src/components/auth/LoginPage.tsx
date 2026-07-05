@@ -59,25 +59,26 @@ const LoginPage: React.FC = () => {
         }
         if (registrationStep === 'form') {
           // First step: create pending user, send OTP
-          await register(email, password, 'manager');
+          await register(email, password, 'admin');
         } else {
           // Second step: verify OTP and activate user
-          await register(email, password, 'manager', twoFactorToken);
+          await register(email, password, 'admin', twoFactorToken);
         }
       }
-    } catch (err: any) {
+    } catch (err) {
+      const message = err instanceof Error ? err.message : '';
       // Check for backend 2FA/OTP responses
       if (
-        err.message &&
-        (err.message.includes('2FA required') ||
-          err.message.includes('OTP sent to email') ||
-          err.message.includes('OTP sent to email to complete registration'))
+        message &&
+        (message.includes('2FA required') ||
+          message.includes('OTP sent to email') ||
+          message.includes('OTP sent to email to complete registration'))
       ) {
           setShow2FA(true);
           setRegistrationStep('otp');
           setConfirmPassword('');
         // Try to detect method from error message or backend response
-        if (err.message.includes('email')) {
+        if (message.includes('email')) {
           setTwoFAMethod('email');
           setInfo('Enter the code sent to your email to complete registration.');
         } else {
@@ -87,14 +88,14 @@ const LoginPage: React.FC = () => {
         setError('');
       } else if (
         registrationStep === 'otp' &&
-        err.message &&
-        err.message.toLowerCase().includes('user already exists')
+        message &&
+        message.toLowerCase().includes('user already exists')
       ) {
         setError('Registration already completed or OTP expired. Please try logging in.');
         setShow2FA(false);
         setRegistrationStep('form');
       } else {
-        setError(err instanceof Error ? err.message : 'Authentication failed');
+        setError(message || 'Authentication failed');
       }
     } finally {
       setLoading(false);
@@ -138,7 +139,7 @@ const LoginPage: React.FC = () => {
               {isLogin ? 'Welcome back to Aikya' : 'Create your Aikya account'}
             </h1>
             <p className="text-slate-400">
-              {isLogin ? 'Sign in to continue your unified workflow' : 'Start a calm, unified DevOps journey'}
+              {isLogin ? 'Sign in to access your unified workspace.' : 'Create a unified operations workspace for your team.'}
             </p>
           </div>
 

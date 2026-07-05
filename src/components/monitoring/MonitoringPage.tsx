@@ -21,10 +21,25 @@ interface Metric {
   value: number;
 }
 
+interface MetricsData {
+  message?: string;
+  guidance?: string;
+  expected_metrics?: string[];
+  data_source?: string;
+  data_available?: boolean;
+  requires_integration?: boolean;
+  cpu?: Metric[];
+  memory?: Metric[];
+  responseTime?: Metric[];
+  uptime?: number;
+}
+
+type IntegrationItem = { type?: string; is_active?: boolean };
+
 const MonitoringPage: React.FC = () => {
   const { onboarding, token } = useAuth();
   const [alerts, setAlerts] = useState<Alert[]>([]);
-  const [metrics, setMetrics] = useState<any>({});
+  const [metrics, setMetrics] = useState<MetricsData>({});
   const [loading, setLoading] = useState(true);
   const [selectedProject] = useState(1);
   const [requiresIntegration, setRequiresIntegration] = useState(false);
@@ -64,16 +79,16 @@ const MonitoringPage: React.FC = () => {
       setMetrics(metricsRes.data);
       setRequiresIntegration(Boolean(metricsRes.data?.requires_integration));
       const list = Array.isArray(integrationsRes.data) ? integrationsRes.data : [];
-      const slack = list.find((item: any) => item.type === 'slack' && item.is_active);
-      const pagerduty = list.find((item: any) => item.type === 'pagerduty' && item.is_active);
+      const slack = list.find((item: IntegrationItem) => item.type === 'slack' && item.is_active);
+      const pagerduty = list.find((item: IntegrationItem) => item.type === 'pagerduty' && item.is_active);
       setChannels({
         slack: slack?.configuration?.metadata?.workspace || slack?.name,
         pagerduty: pagerduty?.configuration?.metadata?.service_id || pagerduty?.name
       });
       setMonitoringSources([
-        { type: 'datadog', label: 'Datadog', connected: Boolean(list.find((item: any) => item.type === 'datadog' && item.is_active)) },
-        { type: 'prometheus', label: 'Prometheus', connected: Boolean(list.find((item: any) => item.type === 'prometheus' && item.is_active)) },
-        { type: 'grafana', label: 'Grafana', connected: Boolean(list.find((item: any) => item.type === 'grafana' && item.is_active)) }
+        { type: 'datadog', label: 'Datadog', connected: Boolean(list.find((item: IntegrationItem) => item.type === 'datadog' && item.is_active)) },
+        { type: 'prometheus', label: 'Prometheus', connected: Boolean(list.find((item: IntegrationItem) => item.type === 'prometheus' && item.is_active)) },
+        { type: 'grafana', label: 'Grafana', connected: Boolean(list.find((item: IntegrationItem) => item.type === 'grafana' && item.is_active)) }
       ]);
     } catch (error) {
       console.error('Failed to fetch monitoring data:', error);
@@ -164,11 +179,11 @@ const MonitoringPage: React.FC = () => {
           </div>
         )}
 
-        {metrics?.expected_metrics?.length > 0 && (
+        {(metrics?.expected_metrics?.length ?? 0) > 0 && (
           <div className="mb-6 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-300">
             <p className="text-xs uppercase tracking-[0.3em] text-slate-400 mb-2">Expected metrics</p>
             <div className="flex flex-wrap gap-2">
-              {metrics.expected_metrics.map((metric: string) => (
+              {metrics.expected_metrics?.map((metric: string) => (
                 <span key={metric} className="rounded-full bg-white/10 px-3 py-1 text-xs text-slate-200">
                   {metric}
                 </span>
