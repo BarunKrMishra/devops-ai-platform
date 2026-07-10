@@ -3,8 +3,29 @@ import { OpsModule } from '../models/index.js';
 import { runMigrations } from './migrate.js';
 
 export const connectDatabase = async () => {
-  await sequelize.authenticate();
-  return sequelize;
+  // Retry with backoff so a not-yet-ready database (common on container
+  // platforms where the DB and app boot together) doesn't hard-crash the
+  // process before it can serve the health check. console.error is used
+  // because console.log/info are silenced in production (see config/env.js).
+  const maxAttempts = 10;
+  let lastError;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      await sequelize.authenticate();
+      if (attempt > 1) {
+        console.error(`[db] connected on attempt ${attempt}`);
+      }
+      return sequelize;
+    } catch (error) {
+      lastError = error;
+      console.error(`[db] connection attempt ${attempt}/${maxAttempts} failed: ${error.message}`);
+      if (attempt < maxAttempts) {
+        await new Promise((resolve) => setTimeout(resolve, Math.min(attempt * 2000, 10000)));
+      }
+    }
+  }
+  console.error('[db] all connection attempts exhausted. Check MYSQL_URL / MYSQL_* and that the database service is reachable.');
+  throw lastError;
 };
 
 export const seedOpsModules = async () => {
