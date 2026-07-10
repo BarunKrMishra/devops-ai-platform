@@ -12,6 +12,37 @@ Config files already in the repo: `railway.json`, `vercel.json`, `netlify.toml`.
 
 ---
 
+## Quick launch: Railway API with SQLite (no separate database)
+
+For an early launch you don't need a MySQL service at all — SQLite on a
+persistent volume is enough and removes all database-networking setup. Switch to
+MySQL later (see §1) with only an env change; the code is dialect-agnostic.
+
+1. **Add a volume:** API service → **Settings → Volumes → Add Volume**, mount path `/data`.
+2. **Set variables** on the API service:
+   ```
+   NODE_ENV=production
+   DB_DIALECT=sqlite
+   SQLITE_STORAGE=/data/devops_ai.sqlite
+   NODE_OPTIONS=--dns-result-order=ipv4first
+   JWT_SECRET=<32-byte hex>
+   INTEGRATION_MASTER_KEY=<32-byte hex>
+   PLATFORM_ADMIN_EMAILS=you@your-company.com
+   CORS_ORIGIN=https://your-frontend.vercel.app
+   APP_BASE_URL=https://your-frontend.vercel.app
+   EMAIL_USER / EMAIL_PASS / EMAIL_FROM / BUSINESS_INBOX
+   GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET
+   INTEGRATION_GITHUB_CLIENT_ID / INTEGRATION_GITHUB_CLIENT_SECRET
+   ```
+   Do **not** set `PORT` (Railway injects it). No `MYSQL_*` vars are needed.
+3. Deploy. Success in Deploy Logs: `[db] connected on attempt 1` → `Server running in production mode`.
+
+> ⚠️ The `/data` volume is your database. Keep it. Deleting it deletes all data.
+> SQLite is single-writer — great for launch, the first thing you outgrow under
+> heavy concurrency. That's the moment to move to §1 (MySQL).
+
+---
+
 ## 0) Before you start
 - Push is done — repo is at `github.com/BarunKrMishra/devops-ai-platform` (`main`).
 - Generate two secrets (keep them safe, never commit):

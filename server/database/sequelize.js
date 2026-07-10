@@ -1,6 +1,7 @@
 import { Sequelize } from 'sequelize';
 import { fileURLToPath } from 'url';
 import { dirname, resolve, isAbsolute } from 'path';
+import { mkdirSync } from 'fs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -22,6 +23,17 @@ const buildSqlite = () => {
   const storage = isAbsolute(configured)
     ? configured
     : resolve(__dirname, '../../', configured);
+
+  // Ensure the parent directory exists. On container platforms the SQLite file
+  // lives on a mounted volume (e.g. /data/devops_ai.sqlite); if the directory
+  // isn't present yet, SQLite fails with SQLITE_CANTOPEN. Creating it is a no-op
+  // when it already exists.
+  try {
+    mkdirSync(dirname(storage), { recursive: true });
+  } catch {
+    // Directory may already exist or be unwritable at build time; the actual
+    // open will surface a clear error if the path is genuinely unusable.
+  }
 
   return new Sequelize({
     dialect: 'sqlite',
