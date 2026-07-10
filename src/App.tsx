@@ -16,6 +16,9 @@ import OpsSuite from './components/landing/OpsSuite';
 import Workflow from './components/landing/Workflow';
 import Security from './components/landing/Security';
 import FinalCTA from './components/landing/FinalCTA';
+import Reveal from './components/landing/Reveal';
+import AikyaAdminPage from './components/platform/AikyaAdminPage';
+import VisitTracker from './components/analytics/VisitTracker';
 import CICDSetupPage from './components/cicd/CICDSetupPage';
 import InfrastructureManagementPage from './components/infrastructure/InfrastructureManagementPage';
 import MonitoringPage from './components/monitoring/MonitoringPage';
@@ -91,14 +94,14 @@ const LandingPage: React.FC = () => {
     <div className="min-h-screen bg-aikya">
       <Header />
       <Hero />
-      <TrustBar />
-      <MetricsPulse />
-      <Features />
-      <UseCases />
-      <OpsSuite />
-      <Workflow />
-      <Security />
-      <FinalCTA />
+      <Reveal><TrustBar /></Reveal>
+      <Reveal><MetricsPulse /></Reveal>
+      <Reveal><Features /></Reveal>
+      <Reveal><UseCases /></Reveal>
+      <Reveal><OpsSuite /></Reveal>
+      <Reveal><Workflow /></Reveal>
+      <Reveal><Security /></Reveal>
+      <Reveal><FinalCTA /></Reveal>
       <Footer />
     </div>
   );
@@ -266,6 +269,13 @@ const AppRoutes: React.FC = () => {
             </ProtectedRoute>
           } />
 
+          {/* Aikya team super-admin console (platform-admins only; enforced by the API). */}
+          <Route path="/aikya-admin" element={
+            <ProtectedRoute>
+              <AikyaAdminPage />
+            </ProtectedRoute>
+          } />
+
           <Route path="/collaboration" element={
             <ProtectedRoute>
               <ProtectedShell>
@@ -322,6 +332,7 @@ function App() {
         <OpsProvider>
           <Router>
             <ScrollToHash />
+            <VisitTracker />
             <AppRoutes />
           </Router>
         </OpsProvider>

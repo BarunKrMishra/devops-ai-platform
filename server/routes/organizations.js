@@ -129,6 +129,9 @@ router.get('/members', async (req, res) => {
 
     const members = await User.findAll({
       where: { organization_id: organizationId },
+      // Only expose safe fields — never password_hash, two_factor_secret,
+      // github_token, reset_otp, otp_expiry, etc.
+      attributes: ['id', 'email', 'name', 'role', 'is_active', 'permissions', 'last_login', 'created_at'],
       order: [['role', 'ASC'], ['name', 'ASC']],
       raw: true
     });

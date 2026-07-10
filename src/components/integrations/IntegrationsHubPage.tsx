@@ -356,6 +356,7 @@ const IntegrationsHubPage: React.FC = () => {
                         </label>
                         {field.type === 'select' ? (
                           <select
+                            aria-label={field.label}
                             value={formState[provider.key]?.[field.key] || ''}
                             onChange={(event) => updateField(provider.key, field.key, event.target.value)}
                             className="mt-2 w-full p-3 rounded-lg bg-white/10 border border-white/20 text-white focus:border-amber-400 focus:outline-none"

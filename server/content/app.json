@@ -20,36 +20,36 @@
       ],
       "signals": [
         {
-          "label": "Ops suites live",
+          "label": "Ops suites",
           "value": "6",
           "accent": "emerald"
         },
         {
-          "label": "Integrations ready",
-          "value": "25+",
+          "label": "Integrations",
+          "value": "30+",
           "accent": "amber"
         },
         {
           "label": "AI coverage",
-          "value": "24x7",
+          "value": "24×7",
           "accent": "teal"
         }
       ],
       "stats": [
         {
-          "label": "Automation coverage",
-          "value": "92%",
-          "detail": "cross ops adoption"
+          "label": "Operational domains",
+          "value": "6 suites",
+          "detail": "engineering to marketing"
         },
         {
-          "label": "Ops response time",
-          "value": "5 min",
-          "detail": "median workflows"
+          "label": "Connect your stack",
+          "value": "30+ tools",
+          "detail": "CI/CD, cloud, CRM, payments"
         },
         {
-          "label": "Teams onboarded",
-          "value": "150+",
-          "detail": "across industries"
+          "label": "Enterprise security",
+          "value": "AES-256",
+          "detail": "encrypted · OTP · audited"
         }
       ],
       "panel": {
@@ -58,9 +58,9 @@
       }
     },
     "trust": {
-      "kicker": "Trusted teams",
-      "title": "Built for teams running critical operations.",
-      "subtitle": "Aikya supports multi team operations with reliable automation across regulated industries.",
+      "kicker": "Works with your stack",
+      "title": "Connects to the tools you already use.",
+      "subtitle": "Link CI/CD, cloud, monitoring, email, CRM, payments and more — credentials encrypted, data synced automatically.",
       "tags": [
         "Fintech",
         "SaaS",
@@ -322,45 +322,105 @@
       "about": "Aikya unifies operations with AI guided automation across engineering and business teams.",
       "contactEmail": "aikya.devops@gmail.com",
       "socials": [
-        { "key": "github", "url": "https://github.com" },
-        { "key": "twitter", "url": "https://twitter.com" },
-        { "key": "linkedin", "url": "https://linkedin.com" }
+        {
+          "key": "github",
+          "url": "https://github.com"
+        },
+        {
+          "key": "twitter",
+          "url": "https://twitter.com"
+        },
+        {
+          "key": "linkedin",
+          "url": "https://linkedin.com"
+        }
       ],
       "columns": [
         {
           "title": "Platform",
           "links": [
-            { "label": "Ops suites", "to": "/#ops" },
-            { "label": "Integrations", "to": "/integrations" },
-            { "label": "Pricing", "to": "/pricing" },
-            { "label": "Enterprise", "to": "/enterprise" }
+            {
+              "label": "Ops suites",
+              "to": "/#ops"
+            },
+            {
+              "label": "Integrations",
+              "to": "/integrations"
+            },
+            {
+              "label": "Pricing",
+              "to": "/pricing"
+            },
+            {
+              "label": "Enterprise",
+              "to": "/enterprise"
+            }
           ]
         },
         {
           "title": "Resources",
           "links": [
-            { "label": "Documentation", "to": "/docs" },
-            { "label": "Workflows", "to": "/docs#workflows" },
-            { "label": "API reference", "to": "/docs#api" },
-            { "label": "Security", "to": "/enterprise" }
+            {
+              "label": "Documentation",
+              "to": "/docs"
+            },
+            {
+              "label": "Workflows",
+              "to": "/docs#workflows"
+            },
+            {
+              "label": "API reference",
+              "to": "/docs#api"
+            },
+            {
+              "label": "Security",
+              "to": "/enterprise"
+            }
           ]
         },
         {
           "title": "Company",
           "links": [
-            { "label": "About", "to": "/about" },
-            { "label": "Blog", "to": "/blog" },
-            { "label": "Careers", "to": "/careers" },
-            { "label": "Contact", "to": "/contact" },
-            { "label": "Feedback", "to": "/feedback" },
-            { "label": "Community", "to": "/community" }
+            {
+              "label": "About",
+              "to": "/about"
+            },
+            {
+              "label": "Blog",
+              "to": "/blog"
+            },
+            {
+              "label": "Careers",
+              "to": "/careers"
+            },
+            {
+              "label": "Contact",
+              "to": "/contact"
+            },
+            {
+              "label": "Feedback",
+              "to": "/feedback"
+            },
+            {
+              "label": "Community",
+              "to": "/community"
+            }
           ]
         }
       ],
       "legal": [
-        { "label": "Privacy", "to": "/privacy" },
-        { "label": "Terms", "to": "/terms" },
-        { "label": "Cookies", "to": "/cookies" }
+        {
+          "label": "Privacy",
+          "to": "/privacy"
+        },
+        {
+          "label": "Terms",
+          "to": "/terms"
+        },
+        {
+          "label": "Cookies",
+          "to": "/cookies"
+        }
       ],
       "copyright": "(c) 2026 Aikya. All rights reserved."
     }

@@ -29,13 +29,13 @@ const Features: React.FC = () => {
           </p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 [perspective:1200px]">
           {features.map((feature, index) => {
             const Icon = getIcon(feature.icon);
             return (
             <div
               key={index}
-              className="group bg-white/5 backdrop-blur-sm rounded-2xl p-8 border border-white/10 hover:bg-white/10 transition-all duration-300 hover:translate-y-[-4px]"
+              className="aikya-tilt group bg-white/5 backdrop-blur-sm rounded-2xl p-8 border border-white/10 hover:bg-white/10 hover:border-amber-400/30"
             >
               <div className={`p-4 bg-gradient-to-r ${gradients[index % gradients.length]} rounded-xl w-fit mb-6 group-hover:scale-110 transition-transform`}>
                 <Icon className="h-8 w-8 text-white" />

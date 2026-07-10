@@ -328,6 +328,7 @@ const TemplateGalleryPage: React.FC = () => {
                 Category
               </label>
               <select
+                aria-label="Filter by category"
                 value={selectedCategory}
                 onChange={(e) => setSelectedCategory(e.target.value)}
                 className="w-full p-2 bg-white/10 border border-white/20 rounded-lg text-white focus:border-amber-400 focus:outline-none"
@@ -368,6 +369,8 @@ const TemplateGalleryPage: React.FC = () => {
                   <p className="text-slate-400 text-sm mb-3 line-clamp-2">{template.description}</p>
                 </div>
                 <button
+                  type="button"
+                  aria-label="Preview template"
                   onClick={() => setSelectedTemplate(template)}
                   className="p-2 text-slate-400 hover:text-white transition-colors"
                 >
@@ -447,6 +450,8 @@ const TemplateGalleryPage: React.FC = () => {
                 <div className="flex items-center justify-between">
                   <h2 className="text-2xl font-bold text-white">{selectedTemplate.name}</h2>
                   <button
+                    type="button"
+                    aria-label="Close template preview"
                     onClick={() => setSelectedTemplate(null)}
                     className="text-slate-400 hover:text-white"
                   >
@@ -544,6 +549,8 @@ const TemplateGalleryPage: React.FC = () => {
                 <div className="flex items-center justify-between">
                   <h2 className="text-2xl font-bold text-white">Create a Template</h2>
                   <button
+                    type="button"
+                    aria-label="Close create template"
                     onClick={() => {
                       setShowCreateModal(false);
                       setCreateError('');
@@ -575,6 +582,7 @@ const TemplateGalleryPage: React.FC = () => {
                   <div>
                     <label className="block text-xs text-slate-300 mb-2">Category *</label>
                     <select
+                      aria-label="Template category"
                       value={createForm.category}
                       onChange={(event) =>
                         setCreateForm((prev) => ({ ...prev, category: event.target.value }))
@@ -636,6 +644,7 @@ const TemplateGalleryPage: React.FC = () => {
                 <div>
                   <label className="block text-xs text-slate-300 mb-2">Template configuration (JSON) *</label>
                   <textarea
+                    aria-label="Template configuration JSON"
                     value={createForm.templateData}
                     onChange={(event) =>
                       setCreateForm((prev) => ({ ...prev, templateData: event.target.value }))

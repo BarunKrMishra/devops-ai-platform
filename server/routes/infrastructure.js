@@ -162,10 +162,24 @@ router.post('/provision', async (req, res) => {
     const { projectId, resourceType, configuration } = req.body;
     const organizationId = req.user.organization_id;
 
+    if (!resourceType) {
+      return res.status(400).json({ error: 'resourceType is required.' });
+    }
+
     // Validate project ownership (org scoped)
     const project = await Project.findOne({ where: { id: projectId, organization_id: organizationId }, raw: true });
     if (!project) {
       return res.status(404).json({ error: 'Project not found' });
+    }
+
+    // A cloud integration must be connected before provisioning. This keeps the
+    // flow honest instead of reporting success with nothing behind it.
+    const awsIntegration = await loadAwsIntegration(organizationId);
+    if (!awsIntegration) {
+      return res.status(400).json({
+        error: 'Connect a cloud account (AWS) before provisioning resources.',
+        requires_integration: true
+      });
     }
 
     // Simulate provisioning process

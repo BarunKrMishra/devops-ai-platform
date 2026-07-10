@@ -133,6 +133,44 @@
       transform: translateY(-8px);
     }
   }
+
+  /* Scroll-reveal: sections ease up into view as they enter the viewport.
+     Toggled by the Reveal component; degrades gracefully to visible. */
+  .aikya-reveal {
+    opacity: 0;
+    transform: translateY(28px);
+    transition: opacity 0.7s cubic-bezier(0.2, 0.7, 0.2, 1),
+      transform 0.7s cubic-bezier(0.2, 0.7, 0.2, 1);
+    will-change: opacity, transform;
+  }
+
+  .aikya-reveal.is-visible {
+    opacity: 1;
+    transform: none;
+  }
+
+  /* Subtle 3D lift + tilt on interactive cards. */
+  .aikya-tilt {
+    transition: transform 0.35s cubic-bezier(0.2, 0.7, 0.2, 1),
+      box-shadow 0.35s ease, border-color 0.35s ease;
+    transform-style: preserve-3d;
+  }
+
+  .aikya-tilt:hover {
+    transform: translateY(-6px) rotateX(3deg) rotateY(-3deg);
+    box-shadow: 0 24px 60px rgba(2, 6, 23, 0.45);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .aikya-reveal {
+      opacity: 1 !important;
+      transform: none !important;
+      transition: none;
+    }
+    .aikya-tilt:hover {
+      transform: none;
+    }
+  }
 }
 
 /* Custom scrollbar */

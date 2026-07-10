@@ -213,6 +213,7 @@ const AuditLogsPage: React.FC = () => {
                 Action Type
               </label>
               <select
+                aria-label="Action Type"
                 value={filterAction}
                 onChange={(e) => setFilterAction(e.target.value)}
                 className="w-full p-2 bg-white/10 border border-white/20 rounded-lg text-white focus:border-amber-400 focus:outline-none"
@@ -232,6 +233,7 @@ const AuditLogsPage: React.FC = () => {
               </label>
               <input
                 type="date"
+                aria-label="Start date"
                 value={dateRange.start}
                 onChange={(e) => setDateRange(prev => ({ ...prev, start: e.target.value }))}
                 className="w-full p-2 bg-white/10 border border-white/20 rounded-lg text-white focus:border-amber-400 focus:outline-none"
@@ -244,6 +246,7 @@ const AuditLogsPage: React.FC = () => {
               </label>
               <input
                 type="date"
+                aria-label="End date"
                 value={dateRange.end}
                 onChange={(e) => setDateRange(prev => ({ ...prev, end: e.target.value }))}
                 className="w-full p-2 bg-white/10 border border-white/20 rounded-lg text-white focus:border-amber-400 focus:outline-none"
@@ -335,6 +338,8 @@ const AuditLogsPage: React.FC = () => {
                     </td>
                     <td className="px-6 py-4">
                         <button
+                          type="button"
+                          aria-label="View log details"
                           onClick={() => setSelectedLog(log)}
                           className="p-1 text-slate-400 hover:text-white transition-colors"
                         >
@@ -388,6 +393,8 @@ const AuditLogsPage: React.FC = () => {
               <div className="p-6 border-b border-white/10 flex items-center justify-between">
                 <h2 className="text-xl font-semibold text-white">Audit Details</h2>
                 <button
+                  type="button"
+                  aria-label="Close details"
                   onClick={() => setSelectedLog(null)}
                   className="text-slate-400 hover:text-white transition-colors"
                 >

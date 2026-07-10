@@ -378,6 +378,7 @@ const UserSettingsPage: React.FC = () => {
                       </label>
                       <input
                         type="text"
+                        aria-label="Full name"
                         value={profile.name}
                         onChange={(e) => setProfile((prev) => ({ ...prev, name: e.target.value }))}
                         className="w-full p-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-slate-400 focus:border-amber-400 focus:outline-none"
@@ -390,6 +391,7 @@ const UserSettingsPage: React.FC = () => {
                       </label>
                       <input
                         type="email"
+                        aria-label="Email address"
                         value={profile.email}
                         onChange={(e) => setProfile((prev) => ({ ...prev, email: e.target.value }))}
                         className="w-full p-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-slate-400 focus:border-amber-400 focus:outline-none"
@@ -402,6 +404,7 @@ const UserSettingsPage: React.FC = () => {
                         Role
                       </label>
                       <select
+                        aria-label="Role"
                         value={profile.role}
                         className="w-full p-3 bg-white/10 border border-white/20 rounded-lg text-white focus:border-amber-400 focus:outline-none"
                         disabled
@@ -484,6 +487,8 @@ const UserSettingsPage: React.FC = () => {
                           </p>
                         </div>
                         <button
+                          type="button"
+                          aria-label={`Toggle ${key}`}
                           onClick={() => setNotifications((prev) => ({ ...prev, [key]: !value }))}
                           className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
                             value ? 'bg-amber-500' : 'bg-slate-600'
@@ -523,6 +528,8 @@ const UserSettingsPage: React.FC = () => {
                         </p>
                       </div>
                       <button
+                        type="button"
+                        aria-label="Toggle demo data mode"
                         onClick={handleToggleDemoMode}
                         disabled={demoSaving}
                         className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
@@ -561,6 +568,8 @@ const UserSettingsPage: React.FC = () => {
                 <h2 className="text-lg font-semibold">Change Password</h2>
               </div>
               <button
+                type="button"
+                aria-label="Close change password"
                 onClick={() => setShowPasswordModal(false)}
                 className="text-slate-400 hover:text-white transition-colors"
               >
@@ -611,6 +620,8 @@ const UserSettingsPage: React.FC = () => {
                 <h2 className="text-lg font-semibold">Enable 2FA</h2>
               </div>
               <button
+                type="button"
+                aria-label="Close enable 2FA"
                 onClick={() => setShowTwoFactorModal(false)}
                 className="text-slate-400 hover:text-white transition-colors"
               >
@@ -654,6 +665,8 @@ const UserSettingsPage: React.FC = () => {
                 <h2 className="text-lg font-semibold">API Keys</h2>
               </div>
               <button
+                type="button"
+                aria-label="Close API keys"
                 onClick={() => setShowApiKeysModal(false)}
                 className="text-slate-400 hover:text-white transition-colors"
               >

@@ -10,6 +10,19 @@ import winston from 'winston';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
+import axios from 'axios';
+import { isBlockedRequestUrl } from './utils/ssrf.js';
+
+// Global SSRF guard: reject any outbound HTTP request to a cloud-metadata host.
+axios.interceptors.request.use((config) => {
+  const target = config.url && /^https?:\/\//i.test(config.url)
+    ? config.url
+    : `${config.baseURL || ''}${config.url || ''}`;
+  if (target && isBlockedRequestUrl(target)) {
+    return Promise.reject(new Error('Blocked outbound request to a metadata endpoint.'));
+  }
+  return config;
+});
 import authRoutes from './routes/auth.js';
 import cicdRoutes from './routes/cicd.js';
 import infrastructureRoutes from './routes/infrastructure.js';
@@ -31,7 +44,10 @@ import businessRoutes from './routes/business.js';
 import opsRoutes from './routes/ops.js';
 import billingRoutes from './routes/billing.js';
 import contentRoutes from './routes/content.js';
+import trackRoutes from './routes/track.js';
+import platformRoutes from './routes/platform.js';
 import { authenticateToken } from './middleware/auth.js';
+import { requirePlatformAdmin } from './middleware/platform.js';
 import { Project } from './models/index.js';
 import { initializeDatabase } from './database/index.js';
 import { startUsageMetricsJob } from './jobs/usageMetrics.js';
@@ -204,7 +220,7 @@ io.use((socket, next) => {
     return next(new Error('Authentication service unavailable'));
   }
   try {
-    const user = jwt.verify(token, process.env.JWT_SECRET);
+    const user = jwt.verify(token, process.env.JWT_SECRET, { algorithms: ['HS256'] });
     socket.user = user;
     next();
   } catch (err) {
@@ -216,6 +232,7 @@ io.use((socket, next) => {
 // Health check route (no authentication required)
 app.use('/api/health', healthRoutes);
 app.use('/api/content', contentRoutes);
+app.use('/api/track', trackRoutes);
 app.use('/api/invites', invitesRoutes);
 
 // Protected routes
@@ -238,6 +255,9 @@ app.use('/api/integrations', authenticateToken, integrationsRoutes);
 app.use('/api/business', authenticateToken, businessRoutes);
 app.use('/api/ops', authenticateToken, opsRoutes);
 app.use('/api/billing', authenticateToken, billingRoutes);
+
+// Aikya team super-admin console — cross-organization, gated to platform admins.
+app.use('/api/platform', authenticateToken, requirePlatformAdmin, platformRoutes);
 
 // WebSocket connection handling with improved security and error handling
 io.on('connection', (socket) => {

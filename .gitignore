@@ -3,12 +3,10 @@ node_modules/
 .pnp/
 .pnp.js
 
-# Environment variables
+# Environment variables (never commit real secrets; keep only .env.example)
 .env
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
+.env.*
+!.env.example
 
 # Build outputs
 dist/
@@ -48,8 +46,9 @@ scratch_*
 # Redundant duplicate project copy (source lives at repo root)
 devops-ai-platform-main/
 
-# Archives / extracted docs (keep out of the app repo)
+# Archives / docs (keep out of the app repo)
 *.zip
+*.pdf
 _pdf_text/
 
 # Claude Code local settings (per-machine harness config, not project code)

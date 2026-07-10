@@ -120,12 +120,12 @@ router.get('/repositories', async (req, res) => {
 // Get project pipelines (for current user)
 router.get('/pipelines', async (req, res) => {
   try {
-    const userId = req.user.id;
     const orgId = req.user.organization_id;
-    
-    // Get projects with their pipelines
+
+    // Projects are organization resources (consistent with the rest of the app),
+    // so all members of the org see the org's pipelines.
     const projects = await Project.findAll({
-      where: { user_id: userId },
+      where: { organization_id: orgId },
       order: [['created_at', 'DESC']],
       raw: true
     });
@@ -385,13 +385,15 @@ router.post('/deploy/:projectId', async (req, res) => {
     const { projectId } = req.params;
     const { environment = 'production' } = req.body;
     const userId = req.user.id;
+    const organizationId = req.user.organization_id;
 
-    // Get project with user verification
-    const project = await Project.findOne({ where: { id: projectId, user_id: userId }, raw: true });
+    // Deploy any project belonging to the caller's organization (org-scoped,
+    // consistent with the rest of the platform).
+    const project = await Project.findOne({ where: { id: projectId, organization_id: organizationId }, raw: true });
 
     if (!project) {
-      return res.status(404).json({ 
-        error: 'Project not found or you do not have permission to deploy it.' 
+      return res.status(404).json({
+        error: 'Project not found or you do not have permission to deploy it.'
       });
     }
 

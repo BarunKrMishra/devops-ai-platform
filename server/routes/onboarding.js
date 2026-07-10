@@ -1,8 +1,12 @@
 import express from 'express';
 import { OnboardingProfile, OnboardingSetting, GoLiveRequest, User } from '../models/index.js';
 import { createEmailTransport } from '../utils/email.js';
+import { requireRole } from '../middleware/auth.js';
 
 const router = express.Router();
+
+// Org-wide setup/config changes are restricted to admins and managers.
+const requireManager = requireRole(['admin', 'manager']);
 
 const isValidEmail = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 
@@ -180,7 +184,7 @@ router.get('/status', async (req, res) => {
   });
 });
 
-router.post('/', async (req, res) => {
+router.post('/', requireManager, async (req, res) => {
   const orgId = req.user.organization_id;
   const userId = req.user.id;
 
@@ -267,14 +271,20 @@ router.post('/', async (req, res) => {
     await OnboardingProfile.create(payload);
   }
 
-  await sendOnboardingEmail(payload);
+  // The internal notification email is a side effect and must not block
+  // onboarding from succeeding (e.g. if email is not configured).
+  try {
+    await sendOnboardingEmail(payload);
+  } catch (error) {
+    console.error('Onboarding notification email failed:', error);
+  }
 
   await User.update({ updated_at: new Date() }, { where: { id: userId } });
 
   res.json({ message: 'Onboarding details saved.' });
 });
 
-router.patch('/settings', async (req, res) => {
+router.patch('/settings', requireManager, async (req, res) => {
   const orgId = req.user.organization_id;
   const { demo_mode } = req.body || {};
 
@@ -288,7 +298,7 @@ router.patch('/settings', async (req, res) => {
   res.json({ message: 'Settings updated.' });
 });
 
-router.post('/request-live', async (req, res) => {
+router.post('/request-live', requireManager, async (req, res) => {
   const orgId = req.user.organization_id;
   const userId = req.user.id;
 
@@ -335,17 +345,24 @@ router.post('/request-live', async (req, res) => {
 
   await GoLiveRequest.create(requestPayload);
 
-  await sendGoLiveEmail({
-    ...profile,
-    ...requestPayload,
-    requested_by: requester?.email || 'Unknown'
-  });
-
+  // Persist the state change (leave demo mode) before the notification email,
+  // so a failed email can't leave the request recorded but demo mode still on.
   const settings = await OnboardingSetting.findOne({ where: { organization_id: orgId } });
   if (settings) {
     await OnboardingSetting.update({ demo_mode: false }, { where: { organization_id: orgId } });
   } else {
     await OnboardingSetting.create({ organization_id: orgId, demo_mode: false });
+  }
+
+  // Internal notification is best-effort and must not fail the request.
+  try {
+    await sendGoLiveEmail({
+      ...profile,
+      ...requestPayload,
+      requested_by: requester?.email || 'Unknown'
+    });
+  } catch (error) {
+    console.error('Go-live notification email failed:', error);
   }
 
   res.json({ message: 'Live data request submitted.' });

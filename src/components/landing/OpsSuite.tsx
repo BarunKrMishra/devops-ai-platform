@@ -1,8 +1,17 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { Sparkles } from 'lucide-react';
+import { Sparkles, Check } from 'lucide-react';
 import { useContent } from '../../contexts/ContentContext';
 import { getIcon } from '../../utils/iconMap';
+
+const SUITE_GRADIENTS = [
+  'from-amber-500/30 to-orange-500/10',
+  'from-teal-500/30 to-emerald-500/10',
+  'from-sky-500/30 to-teal-500/10',
+  'from-emerald-500/30 to-teal-500/10',
+  'from-violet-500/30 to-sky-500/10',
+  'from-rose-500/30 to-amber-500/10'
+];
 
 const OpsSuite: React.FC = () => {
   const { content } = useContent();
@@ -22,21 +31,24 @@ const OpsSuite: React.FC = () => {
           </div>
         </div>
 
-        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-          {suites.map((suite) => {
+        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3 [perspective:1400px]">
+          {suites.map((suite, index) => {
             const Icon = getIcon(suite.icon);
             return (
-            <div key={suite.title} className="glass rounded-2xl p-6 border border-white/10">
+            <div key={suite.title} className="aikya-tilt glass rounded-2xl p-6 border border-white/10 hover:border-amber-400/30">
               <div className="flex items-center gap-3">
-                <div className="h-10 w-10 rounded-xl bg-white/10 flex items-center justify-center">
-                  <Icon className="h-5 w-5 text-amber-300" />
+                <div className={`h-11 w-11 rounded-xl bg-gradient-to-br ${SUITE_GRADIENTS[index % SUITE_GRADIENTS.length]} flex items-center justify-center`}>
+                  <Icon className="h-5 w-5 text-white" />
                 </div>
                 <h4 className="text-xl font-semibold text-white">{suite.title}</h4>
               </div>
               <p className="text-slate-300 mt-4">{suite.description}</p>
               <ul className="mt-4 space-y-2 text-sm text-slate-300">
                 {suite.highlights.map((item) => (
-                  <li key={item}>- {item}</li>
+                  <li key={item} className="flex items-start gap-2">
+                    <Check className="h-4 w-4 text-teal-300 mt-0.5 shrink-0" />
+                    <span>{item}</span>
+                  </li>
                 ))}
               </ul>
               {section?.badge && (

@@ -6,9 +6,14 @@ import { Integration, IntegrationSecret, IntegrationEvent, BusinessEmail } from 
 import { encryptPayload } from '../utils/encryption.js';
 import { getIntegrationRecord } from '../utils/integrations.js';
 import { syncIntegration, supportedProviders } from '../services/integrations/syncManager.js';
+import { requireRole } from '../middleware/auth.js';
 
 const router = express.Router();
 const oauthCallbackRouter = express.Router();
+
+// Connecting/disconnecting org-wide integration credentials is an admin/manager
+// operation, consistent with every other organization-level mutation.
+const requireManager = requireRole(['admin', 'manager']);
 
 const SUPPORTED_PROVIDERS = [
   'github',
@@ -98,7 +103,48 @@ const buildStateToken = (payload) =>
   jwt.sign(payload, getJwtSecret(), { expiresIn: '10m' });
 
 const verifyStateToken = (token) =>
-  jwt.verify(token, getJwtSecret());
+  jwt.verify(token, getJwtSecret(), { algorithms: ['HS256'] });
+
+// --- Auto-detecting OAuth return URL ---------------------------------------
+// The frontend URL to return to after OAuth is derived from the request that
+// started the flow, so local and production work without editing .env. It is
+// always validated against an allowlist to prevent open-redirects.
+const parseOriginList = (value) =>
+  String(value || '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+const toOrigin = (value) => {
+  try {
+    return new URL(value).origin;
+  } catch {
+    return '';
+  }
+};
+
+const DEFAULT_FRONTEND = process.env.APP_BASE_URL || 'http://localhost:5173';
+const FRONTEND_ALLOWLIST = new Set(
+  [
+    'http://localhost:5173',
+    'http://localhost:5174',
+    process.env.APP_BASE_URL && toOrigin(process.env.APP_BASE_URL),
+    ...parseOriginList(process.env.CORS_ORIGIN).map(toOrigin)
+  ].filter(Boolean)
+);
+
+// Origin of the app that initiated the connect (from the browser request).
+const resolveFrontendOrigin = (req) => {
+  const candidate = toOrigin(req.get('origin') || req.get('referer') || '');
+  if (candidate && FRONTEND_ALLOWLIST.has(candidate)) {
+    return candidate;
+  }
+  return DEFAULT_FRONTEND;
+};
+
+// Only trust a return origin carried in state if it's still allow-listed.
+const safeFrontendBase = (fo) =>
+  fo && FRONTEND_ALLOWLIST.has(fo) ? fo : DEFAULT_FRONTEND;
 
 const upsertIntegration = async ({ orgId, userId, provider, displayName, connectionMethod, metadata = {} }) => {
   const safeConfig = {
@@ -190,7 +236,7 @@ router.get('/', async (req, res) => {
   );
 });
 
-router.post('/connect', async (req, res) => {
+router.post('/connect', requireManager, async (req, res) => {
   const orgId = req.user.organization_id;
   const userId = req.user.id;
 
@@ -251,7 +297,7 @@ router.post('/connect', async (req, res) => {
   });
 });
 
-router.get('/oauth/:provider/start', (req, res) => {
+router.get('/oauth/:provider/start', requireManager, (req, res) => {
   const { provider } = req.params;
   const orgId = req.user.organization_id;
   const userId = req.user.id;
@@ -266,7 +312,7 @@ router.get('/oauth/:provider/start', (req, res) => {
 
   const redirectBase = buildRedirectBase(req);
   const redirectUri = `${redirectBase}/api/integrations/oauth/${provider}/callback`;
-  const state = buildStateToken({ orgId, userId, provider });
+  const state = buildStateToken({ orgId, userId, provider, fo: resolveFrontendOrigin(req) });
 
   const url = new URL(config.authUrl);
   url.searchParams.set('client_id', config.clientId);
@@ -364,18 +410,20 @@ oauthCallbackRouter.get('/:provider/callback', async (req, res) => {
       credentials: tokenData
     });
 
+    const frontendBase = safeFrontendBase(statePayload.fo);
     return res.redirect(
-      `${FRONTEND_BASE_URL}/app/integrations?oauth=success&provider=${provider}`
+      `${frontendBase}/app/integrations?oauth=success&provider=${provider}`
     );
   } catch (err) {
     console.error('OAuth callback error:', err.response?.data || err);
+    const frontendBase = safeFrontendBase(statePayload.fo);
     return res.redirect(
-      `${FRONTEND_BASE_URL}/app/integrations?oauth=error&provider=${provider}`
+      `${frontendBase}/app/integrations?oauth=error&provider=${provider}`
     );
   }
 });
 
-router.post('/:id/disconnect', async (req, res) => {
+router.post('/:id/disconnect', requireManager, async (req, res) => {
   const orgId = req.user.organization_id;
   const integrationId = req.params.id;
 

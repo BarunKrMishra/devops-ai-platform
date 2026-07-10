@@ -228,7 +228,21 @@ router.post('/register', async (req, res) => {
     }
 
     if (!twoFactorToken) {
-      await User.destroy({ where: { email, is_active: false } });
+      // Clean up any prior incomplete registration for this email, including the
+      // organization that was auto-created for it. Without this, every restarted
+      // registration leaks an orphaned organization. Orgs that still have other
+      // members (e.g. an invite-based org with a manager) are left untouched.
+      const staleUser = await User.findOne({ where: { email, is_active: false } });
+      if (staleUser) {
+        const staleOrgId = staleUser.organization_id;
+        await User.destroy({ where: { id: staleUser.id } });
+        if (staleOrgId) {
+          const remaining = await User.count({ where: { organization_id: staleOrgId } });
+          if (remaining === 0) {
+            await Organization.destroy({ where: { id: staleOrgId } });
+          }
+        }
+      }
     }
 
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -869,24 +883,24 @@ router.post('/reset-password', async (req, res) => {
   res.json({ message: 'Password reset successful' });
 });
 
-// 2FA Setup (generate secret and QR)
-router.post('/enable-2fa', async (req, res) => {
-  const { email } = req.body;
-  if (!email) return res.status(400).json({ error: 'Email required' });
-  const user = await User.findOne({ where: { email } });
+// 2FA Setup (generate secret and QR) — only for the authenticated user.
+// Must be authenticated and always operates on req.user, never an arbitrary
+// email from the body, so nobody can reset another account's 2FA secret.
+router.post('/enable-2fa', authenticateToken, async (req, res) => {
+  const user = await User.findByPk(req.user.id);
   if (!user) return res.status(404).json({ error: 'User not found' });
-  const secret = speakeasy.generateSecret({ name: `Aikya (${email})` });
+  const secret = speakeasy.generateSecret({ name: `Aikya (${user.email})` });
   user.two_factor_secret = secret.base32;
   await user.save();
   const qr = await qrcode.toDataURL(secret.otpauth_url);
   res.json({ qr, secret: secret.base32 });
 });
 
-// 2FA Verify (during setup or login)
-router.post('/verify-2fa', async (req, res) => {
-  const { email, token } = req.body;
-  if (!email || !token) return res.status(400).json({ error: 'Email and token required' });
-  const user = await User.findOne({ where: { email } });
+// 2FA Verify (setup) — authenticated user only.
+router.post('/verify-2fa', authenticateToken, async (req, res) => {
+  const { token } = req.body;
+  if (!token) return res.status(400).json({ error: 'Token required' });
+  const user = await User.findByPk(req.user.id);
   if (!user || !user.two_factor_secret) return res.status(400).json({ error: '2FA not set up' });
   const verified = speakeasy.totp.verify({
     secret: user.two_factor_secret,

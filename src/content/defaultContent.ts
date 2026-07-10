@@ -21,36 +21,36 @@ export const defaultContent = {
       ],
       signals: [
         {
-          label: 'Ops suites live',
+          label: 'Ops suites',
           value: '6',
           accent: 'emerald'
         },
         {
-          label: 'Integrations ready',
-          value: '25+',
+          label: 'Integrations',
+          value: '30+',
           accent: 'amber'
         },
         {
           label: 'AI coverage',
-          value: '24x7',
+          value: '24×7',
           accent: 'teal'
         }
       ],
       stats: [
         {
-          label: 'Automation coverage',
-          value: '92%',
-          detail: 'cross ops adoption'
+          label: 'Operational domains',
+          value: '6 suites',
+          detail: 'engineering to marketing'
         },
         {
-          label: 'Ops response time',
-          value: '5 min',
-          detail: 'median workflows'
+          label: 'Connect your stack',
+          value: '30+ tools',
+          detail: 'CI/CD, cloud, CRM, payments'
         },
         {
-          label: 'Teams onboarded',
-          value: '150+',
-          detail: 'across industries'
+          label: 'Enterprise security',
+          value: 'AES-256',
+          detail: 'encrypted · OTP · audited'
         }
       ],
       panel: {
@@ -59,9 +59,9 @@ export const defaultContent = {
       }
     },
     trust: {
-      kicker: 'Trusted teams',
-      title: 'Built for teams running critical operations.',
-      subtitle: 'Aikya supports multi team operations with reliable automation across regulated industries.',
+      kicker: 'Works with your stack',
+      title: 'Connects to the tools you already use.',
+      subtitle: 'Link CI/CD, cloud, monitoring, email, CRM, payments and more — credentials encrypted, data synced automatically.',
       tags: ['Fintech', 'SaaS', 'Retail', 'HealthTech', 'Media', 'Logistics']
     },
     metricsPulse: {

@@ -1,12 +1,14 @@
 import React, { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Menu, X, Home, LayoutDashboard, GitBranch, FileText, Settings, LogOut, LayoutTemplate, Users, TrendingUp, PlugZap, Layers } from 'lucide-react';
+import { Menu, X, Home, LayoutDashboard, GitBranch, FileText, Settings, LogOut, LayoutTemplate, Users, TrendingUp, PlugZap, Layers, ShieldCheck } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import { usePlatformAdmin } from '../hooks/usePlatformAdmin';
 import AikyaLogo from './brand/AikyaLogo';
 
 const Header: React.FC = () => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const { user, logout } = useAuth();
+  const platformAdmin = usePlatformAdmin();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -72,6 +74,14 @@ const Header: React.FC = () => {
           <div className="flex items-center space-x-4 shrink-0">
             {user ? (
               <>
+                {platformAdmin && (
+                  <button
+                    onClick={() => handleNavigation('/aikya-admin')}
+                    className="hidden md:flex items-center gap-2 px-3 py-2 rounded-lg bg-gradient-to-r from-amber-500/20 to-teal-500/20 text-amber-100 border border-amber-400/30 hover:from-amber-500/30 hover:to-teal-500/30 transition-all text-sm"
+                  >
+                    <ShieldCheck className="h-4 w-4" /> Aikya Admin
+                  </button>
+                )}
                 <div className="hidden md:flex items-center space-x-3">
                   <span className="hidden xl:inline text-slate-300 text-sm max-w-[180px] truncate">{user.email}</span>
                   <button
@@ -117,6 +127,15 @@ const Header: React.FC = () => {
                   <span>{item.label}</span>
                 </button>
               ))}
+              {platformAdmin && (
+                <button
+                  onClick={() => handleNavigation('/aikya-admin')}
+                  className="flex items-center space-x-2 px-4 py-2 rounded-lg bg-amber-500/15 text-amber-100 border border-amber-400/30 w-full"
+                >
+                  <ShieldCheck className="h-4 w-4" />
+                  <span>Aikya Admin</span>
+                </button>
+              )}
               <div className="border-t border-white/10 pt-2 mt-2">
                 <div className="px-4 py-2 text-slate-300 text-sm">{user.email}</div>
                 <button

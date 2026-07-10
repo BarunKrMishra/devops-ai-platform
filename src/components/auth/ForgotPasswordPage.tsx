@@ -10,98 +10,43 @@ const ForgotPasswordPage: React.FC = () => {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
-  // Helper function to get API base URL
-  const getApiBaseUrl = () => {
-    return process.env.NODE_ENV === 'production' 
-      ? (process.env.VITE_API_URL || 'https://devops-ai-platform.onrender.com')
-      : '';
-  };
+  // API base URL — same source of truth as the rest of the app (Vite env).
+  const getApiBaseUrl = () => import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
   const handleRequestOtp = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError('');
     setSuccess('');
-    
-    // Get the API base URL from environment variables or use relative path for development
-    const apiBaseUrl = getApiBaseUrl();
-    
-    const apiUrl = `${apiBaseUrl}/api/auth/request-password-reset`;
-    
-    console.log('Sending OTP request for email:', email);
-    console.log('Current window location:', window.location.href);
-    console.log('API URL being used:', apiUrl);
-    console.log('Environment:', process.env.NODE_ENV);
-    console.log('VITE_API_URL:', process.env.VITE_API_URL);
-    
-    // First, test if the API is reachable
+
     try {
-      const healthUrl = `${apiBaseUrl}/api/health`;
-      const healthCheck = await fetch(healthUrl);
-      console.log('Health check status:', healthCheck.status);
-    } catch (healthError) {
-      console.error('Health check failed:', healthError);
-      setError('Cannot connect to server. Please check your connection.');
-      setLoading(false);
-      return;
-    }
-    
-    try {
-      const res = await fetch(apiUrl, {
+      const res = await fetch(`${getApiBaseUrl()}/api/auth/request-password-reset`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email })
       });
-      
-      console.log('Response status:', res.status);
-      console.log('Response headers:', Object.fromEntries(res.headers.entries()));
-      
+
       let data = null;
-      let responseText = '';
-      try {
-        responseText = await res.text();
-        console.log('Response text:', responseText);
-        console.log('Response text length:', responseText.length);
-        console.log('Response text type:', typeof responseText);
-        
-        // Check if response is empty
-        if (!responseText || responseText.trim() === '') {
-          throw new Error('Server returned empty response');
-        }
-        
-        // Try to parse JSON
-        data = JSON.parse(responseText);
-        console.log('Successfully parsed JSON:', data);
-      } catch (parseError) {
-        console.error('Failed to parse JSON response:', parseError);
-        console.error('Response text that failed to parse:', responseText);
-        console.error('Response headers:', Object.fromEntries(res.headers.entries()));
-        
-        // Try to provide more helpful error message
-        if (responseText && responseText.includes('<!DOCTYPE html>')) {
-          throw new Error('Server returned HTML instead of JSON. This usually means the server is not running or there is a routing issue.');
-        } else if (responseText && responseText.includes('Cannot GET') || responseText.includes('Cannot POST')) {
-          throw new Error('API endpoint not found. Please check if the server is running correctly.');
-        } else {
-          throw new Error(`Server returned invalid response format: ${getApiErrorMessage(parseError)}`);
+      const responseText = await res.text();
+      if (responseText && responseText.trim()) {
+        try {
+          data = JSON.parse(responseText);
+        } catch {
+          throw new Error('The server returned an unexpected response. Please try again.');
         }
       }
-      
+
       if (!res.ok) {
-        console.error('Server error response:', data);
         throw new Error((data && data.error) || 'Unexpected server error');
       }
-      
-      console.log('Success response:', data);
-      
-      if (data.devMode && data.devOtp) {
+
+      if (data?.devMode && data?.devOtp) {
         setSuccess(`OTP sent to your email. (Dev mode OTP: ${data.devOtp})`);
       } else {
         setSuccess('OTP sent to your email.');
       }
       setStep(2);
     } catch (err) {
-      console.error('Error in handleRequestOtp:', err);
       setError(getApiErrorMessage(err));
     } finally {
       setLoading(false);
@@ -177,19 +122,7 @@ const ForgotPasswordPage: React.FC = () => {
       <div className="max-w-md w-full">
         <div className="bg-white/10 backdrop-blur-md rounded-2xl border border-white/20 p-8">
           <h2 className="text-2xl font-display text-white mb-6 text-center">Forgot Password</h2>
-          
-          {/* Debug info in development */}
-          {process.env.NODE_ENV === 'development' && (
-            <div className="mb-4 p-3 bg-teal-500/20 border border-teal-500/30 rounded text-teal-300 text-xs">
-              <div>Debug Info:</div>
-              <div>Step: {step}</div>
-              <div>Loading: {loading ? 'Yes' : 'No'}</div>
-              <div>Email: {email}</div>
-              <div>NODE_ENV: {process.env.NODE_ENV}</div>
-              <div>VITE_API_URL: {process.env.VITE_API_URL || 'Not set'}</div>
-              <div>Current URL: {window.location.href}</div>
-            </div>
-          )}
+
           
           {error && <div className="mb-4 p-3 bg-red-500/20 border border-red-500/30 rounded text-red-300 text-sm">{error}</div>}
           {success && <div className="mb-4 p-3 bg-green-500/20 border border-green-500/30 rounded text-green-300 text-sm">{success}</div>}
@@ -207,50 +140,6 @@ const ForgotPasswordPage: React.FC = () => {
                   required
                 />
               </div>
-              
-              {/* Test button in development */}
-              {process.env.NODE_ENV === 'development' && (
-                <div className="space-y-2">
-                  <button 
-                    type="button" 
-                    onClick={async () => {
-                      try {
-                        const apiBaseUrl = getApiBaseUrl();
-                        const healthUrl = `${apiBaseUrl}/api/health`;
-                        const res = await fetch(healthUrl);
-                        const data = await res.json();
-                        console.log('Health check result:', data);
-                        alert(`Health check: ${res.status} - ${JSON.stringify(data, null, 2)}`);
-                      } catch (err) {
-                        console.error('Health check failed:', err);
-                        alert(`Health check failed: ${getApiErrorMessage(err)}`);
-                      }
-                    }}
-                    className="w-full py-2 bg-yellow-500/20 border border-yellow-500/30 rounded text-yellow-300 text-sm"
-                  >
-                    Test API Connection
-                  </button>
-                  
-                  <button 
-                    type="button" 
-                    onClick={async () => {
-                      try {
-                        console.log('Testing direct fetch to backend...');
-                        const res = await fetch('http://localhost:3001/api/health');
-                        const data = await res.json();
-                        console.log('Direct health check result:', data);
-                        alert(`Direct health check: ${res.status} - ${JSON.stringify(data, null, 2)}`);
-                      } catch (err) {
-                        console.error('Direct health check failed:', err);
-                        alert(`Direct health check failed: ${getApiErrorMessage(err)}`);
-                      }
-                    }}
-                    className="w-full py-2 bg-orange-500/20 border border-orange-500/30 rounded text-orange-300 text-sm"
-                  >
-                    Test Direct Backend
-                  </button>
-                </div>
-              )}
               
               <button type="submit" disabled={loading} className="w-full py-3 bg-gradient-to-r from-amber-500 to-teal-500 text-white rounded-lg hover:from-amber-600 hover:to-teal-600 transition-all disabled:opacity-50">
                 {loading ? 'Sending OTP...' : 'Send OTP'}

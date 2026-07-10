@@ -3,6 +3,44 @@ import { Link } from 'react-router-dom';
 import { ArrowRight, Sparkles } from 'lucide-react';
 import { useContent } from '../contexts/ContentContext';
 
+// Scoped, dependency-free 3D hero visual. All classes are prefixed `aikyahero-`
+// and the animation is pure CSS (GPU transforms), so it stays isolated to this
+// component and cannot affect the bundle, other views, or any backend service.
+const heroStyles = `
+.aikyahero-stage { position: relative; perspective: 1100px; }
+.aikyahero-core {
+  position: absolute; top: 50%; left: 50%; width: 360px; height: 360px; max-width: 92%;
+  transform: translate(-50%, -50%); pointer-events: none; z-index: 0;
+  transform-style: preserve-3d;
+}
+.aikyahero-orb {
+  position: absolute; inset: 39%; border-radius: 50%;
+  background: radial-gradient(circle at 32% 26%, #fde68a 0%, #f59e0b 40%, #14b8a6 80%, #0f766e 100%);
+  box-shadow: 0 0 60px rgba(20,184,166,0.40), 0 0 110px rgba(245,158,11,0.22), inset 0 0 22px rgba(255,255,255,0.30);
+  animation: aikyahero-pulse 5s ease-in-out infinite;
+}
+.aikyahero-ring { position: absolute; border-radius: 50%; border: 1.5px solid; will-change: transform; }
+.aikyahero-ring.a { inset: 0;   border-color: rgba(251,191,36,0.50); animation: aikyahero-a 15s linear infinite; }
+.aikyahero-ring.b { inset: 9%;  border-color: rgba(45,212,191,0.50); animation: aikyahero-b 19s linear infinite; }
+.aikyahero-ring.c { inset: 18%; border-color: rgba(255,255,255,0.16); animation: aikyahero-c 24s linear infinite; }
+.aikyahero-dot {
+  position: absolute; top: -5px; left: 50%; margin-left: -5px;
+  width: 10px; height: 10px; border-radius: 50%; background: #fbbf24;
+  box-shadow: 0 0 14px #fbbf24, 0 0 26px rgba(251,191,36,0.6);
+}
+.aikyahero-ring.b .aikyahero-dot { background: #2dd4bf; box-shadow: 0 0 14px #2dd4bf, 0 0 26px rgba(45,212,191,0.6); }
+@keyframes aikyahero-a { from { transform: rotateX(72deg) rotateZ(0deg); }            to { transform: rotateX(72deg) rotateZ(360deg); } }
+@keyframes aikyahero-b { from { transform: rotateX(72deg) rotateY(42deg) rotateZ(0deg); } to { transform: rotateX(72deg) rotateY(42deg) rotateZ(-360deg); } }
+@keyframes aikyahero-c { from { transform: rotateY(74deg) rotateZ(0deg); }            to { transform: rotateY(74deg) rotateZ(360deg); } }
+@keyframes aikyahero-pulse { 0%,100% { transform: scale(1); filter: brightness(1); } 50% { transform: scale(1.06); filter: brightness(1.14); } }
+.aikyahero-panel { position: relative; z-index: 1; transition: transform 0.6s cubic-bezier(.2,.7,.2,1); }
+.aikyahero-stage:hover .aikyahero-panel { transform: rotateY(-4deg) rotateX(2.5deg); }
+@media (prefers-reduced-motion: reduce) {
+  .aikyahero-orb, .aikyahero-ring { animation: none !important; }
+  .aikyahero-stage:hover .aikyahero-panel { transform: none; }
+}
+`;
+
 const Hero: React.FC = () => {
   const { content } = useContent();
   const hero = content.landing.hero;
@@ -83,11 +121,20 @@ const Hero: React.FC = () => {
             )}
           </div>
 
-          <div className="relative aikya-float">
+          <div className="relative aikya-float aikyahero-stage">
+            <style>{heroStyles}</style>
             <div className="absolute -top-10 -left-12 h-40 w-40 rounded-full bg-amber-500/20 blur-3xl"></div>
             <div className="absolute -bottom-16 -right-10 h-48 w-48 rounded-full bg-teal-500/20 blur-3xl"></div>
 
-            <div className="relative glass rounded-2xl p-6 backdrop-blur-sm">
+            {/* Animated 3D "operations intelligence" core behind the panel */}
+            <div className="aikyahero-core" aria-hidden="true">
+              <div className="aikyahero-ring a"><span className="aikyahero-dot"></span></div>
+              <div className="aikyahero-ring b"><span className="aikyahero-dot"></span></div>
+              <div className="aikyahero-ring c"></div>
+              <div className="aikyahero-orb"></div>
+            </div>
+
+            <div className="aikyahero-panel relative glass rounded-2xl p-6 backdrop-blur-sm">
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-xs uppercase tracking-[0.2em] text-slate-400">{panel?.kicker}</p>

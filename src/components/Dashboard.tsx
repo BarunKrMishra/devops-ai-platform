@@ -416,6 +416,7 @@ const Dashboard: React.FC = () => {
                   <div>
                     <label className="text-sm text-slate-300">AI provider *</label>
                     <select
+                      aria-label="AI provider"
                       value={aiProvider}
                       onChange={(event) => setAiProvider(event.target.value)}
                       className="mt-2 w-full p-3 rounded-lg bg-white/10 border border-white/20 text-white placeholder-slate-400 focus:border-amber-400 focus:outline-none"
@@ -431,6 +432,7 @@ const Dashboard: React.FC = () => {
                   <div>
                     <label className="text-sm text-slate-300">Integration method *</label>
                     <select
+                      aria-label="AI integration method"
                       value={aiMethod}
                       onChange={(event) => setAiMethod(event.target.value)}
                       className="mt-2 w-full p-3 rounded-lg bg-white/10 border border-white/20 text-white placeholder-slate-400 focus:border-amber-400 focus:outline-none"

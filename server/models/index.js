@@ -400,8 +400,29 @@ export const SchemaMigration = sequelize.define('SchemaMigration', {
   applied_at: { type: DataTypes.DATE, defaultValue: DataTypes.NOW }
 }, { ...baseOptions, tableName: 'schema_migrations' });
 
+export const PageView = sequelize.define('PageView', {
+  id: { type: DataTypes.INTEGER.UNSIGNED, autoIncrement: true, primaryKey: true },
+  session_id: { type: DataTypes.STRING },
+  user_id: { type: DataTypes.INTEGER.UNSIGNED },
+  organization_id: { type: DataTypes.INTEGER.UNSIGNED },
+  email: { type: DataTypes.STRING },
+  path: { type: DataTypes.STRING },
+  referrer: { type: DataTypes.STRING },
+  ip_address: { type: DataTypes.STRING },
+  user_agent: { type: DataTypes.TEXT }
+}, { ...baseOptions, tableName: 'page_views' });
+
+export const PlatformAdmin = sequelize.define('PlatformAdmin', {
+  id: { type: DataTypes.INTEGER.UNSIGNED, autoIncrement: true, primaryKey: true },
+  email: { type: DataTypes.STRING, allowNull: false, unique: true },
+  name: { type: DataTypes.STRING },
+  added_by: { type: DataTypes.STRING }
+}, { ...baseOptions, tableName: 'platform_admins' });
+
 export default {
   sequelize,
+  PageView,
+  PlatformAdmin,
   Organization,
   User,
   OnboardingProfile,

@@ -26,6 +26,13 @@ const extractJson = (text) => {
   return null;
 };
 
+// When no AI provider is connected we never fabricate analysis. We return an
+// honest signal so the UI can prompt the customer to bring their own AI.
+const AI_NOT_CONNECTED =
+  "AI isn't connected yet. Bring your own AI provider (OpenAI or Anthropic) to unlock "
+  + 'real-time analysis, cost optimization and assistant replies — you get faster, tailored '
+  + 'output on your own model. Native Aikya AI is coming shortly.';
+
 // Process AI command
 router.post('/command', async (req, res) => {
   try {
@@ -64,9 +71,9 @@ router.post('/command', async (req, res) => {
 router.get('/suggestions/:projectId', async (req, res) => {
   try {
     const { projectId } = req.params;
-    const userId = req.user.id;
+    const organizationId = req.user.organization_id;
 
-    const project = await Project.findOne({ where: { id: projectId, user_id: userId }, raw: true });
+    const project = await Project.findOne({ where: { id: projectId, organization_id: organizationId }, raw: true });
     if (!project) {
       return res.status(404).json({ error: 'Project not found' });
     }
@@ -92,9 +99,9 @@ router.get('/suggestions/:projectId', async (req, res) => {
 router.get('/cost-optimization/:projectId', async (req, res) => {
   try {
     const { projectId } = req.params;
-    const userId = req.user.id;
+    const organizationId = req.user.organization_id;
 
-    const project = await Project.findOne({ where: { id: projectId, user_id: userId }, raw: true });
+    const project = await Project.findOne({ where: { id: projectId, organization_id: organizationId }, raw: true });
     if (!project) {
       return res.status(404).json({ error: 'Project not found' });
     }
@@ -110,215 +117,53 @@ router.get('/cost-optimization/:projectId', async (req, res) => {
   }
 });
 
-// Generate realistic predictions based on current data patterns
+// Predictive analysis — real AI only. No fabricated predictions.
 router.get('/predictions', async (_req, res) => {
   try {
-    if (aiService.isEnabled()) {
-      const aiResponse = await aiService.complete(
-        'Generate a JSON array of 3 operational predictions for a DevOps dashboard. '
-        + 'Each item must include: id, type, title, description, confidence, impact, timeframe, recommendation, probability.'
-      );
-      const parsed = extractJson(aiResponse);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        return res.json(parsed);
-      }
+    if (!aiService.isEnabled()) {
+      return res.json({ ai_enabled: false, predictions: [], message: AI_NOT_CONNECTED });
     }
-
-    const now = new Date();
-    const hour = now.getHours();
-    const dayOfWeek = now.getDay();
-    const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
-    const isBusinessHours = hour >= 9 && hour <= 17;
-
-    const predictions = [];
-
-    if (isBusinessHours && !isWeekend) {
-      predictions.push({
-        id: '1',
-        type: 'traffic',
-        title: 'Traffic Spike Predicted',
-        description: `Expected ${Math.floor(200 + Math.random() * 300)}% increase in traffic during peak hours`,
-        confidence: Math.floor(75 + Math.random() * 20),
-        impact: 'high',
-        timeframe: 'Next 2-4 hours',
-        recommendation: 'Scale up instances by 150% before 2 PM',
-        data: generateTrafficData(),
-        probability: 0.85
-      });
-    }
-
-    predictions.push({
-      id: '2',
-      type: 'cost',
-      title: 'Cost Optimization Opportunity',
-      description: 'Unused resources detected during off-peak hours',
-      confidence: Math.floor(85 + Math.random() * 15),
-      impact: 'medium',
-      timeframe: 'Ongoing',
-      recommendation: 'Implement auto-scaling to reduce costs by 25-40%',
-      data: generateCostData(),
-      probability: 0.92
-    });
-
-    if (Math.random() > 0.6) {
-      predictions.push({
-        id: '3',
-        type: 'performance',
-        title: 'Database Performance Degradation',
-        description: 'Query response times trending upward',
-        confidence: Math.floor(70 + Math.random() * 25),
-        impact: 'medium',
-        timeframe: 'Next 1-3 days',
-        recommendation: 'Add read replicas and optimize slow queries',
-        data: generatePerformanceData(),
-        probability: 0.78
-      });
-    }
-
-    if (Math.random() > 0.7) {
-      predictions.push({
-        id: '4',
-        type: 'security',
-        title: 'Potential Security Risk Detected',
-        description: 'Unusual access patterns detected from new IP ranges',
-        confidence: Math.floor(80 + Math.random() * 20),
-        impact: 'high',
-        timeframe: 'Immediate',
-        recommendation: 'Review access logs and implement additional security measures',
-        data: generateSecurityData(),
-        probability: 0.65
-      });
-    }
-
-    res.json(predictions);
+    const aiResponse = await aiService.complete(
+      'Generate a JSON array of 3 operational predictions for a DevOps dashboard. '
+      + 'Each item must include: id, type, title, description, confidence, impact, timeframe, recommendation, probability.'
+    );
+    const parsed = extractJson(aiResponse);
+    return res.json({ ai_enabled: true, predictions: Array.isArray(parsed) ? parsed : [] });
   } catch (error) {
     console.error('Predictions error:', error);
     res.status(500).json({ error: 'Failed to generate predictions' });
   }
 });
 
-// AI-powered recommendations
+// AI recommendations — real AI only.
 router.get('/recommendations', async (_req, res) => {
   try {
-    if (aiService.isEnabled()) {
-      const aiResponse = await aiService.complete(
-        'Generate a JSON array of 4 AI recommendations for DevOps and business ops. '
-        + 'Each item must include: id, category, title, description, impact, effort, estimatedSavings, priority, tags.'
-      );
-      const parsed = extractJson(aiResponse);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        return res.json(parsed);
-      }
+    if (!aiService.isEnabled()) {
+      return res.json({ ai_enabled: false, recommendations: [], message: AI_NOT_CONNECTED });
     }
-
-    const recommendations = [
-      {
-        id: '1',
-        category: 'performance',
-        title: 'Optimize Database Queries',
-        description: 'AI analysis detected 3 slow queries that can be optimized',
-        impact: 'high',
-        effort: 'medium',
-        estimatedSavings: '2-3 seconds response time',
-        priority: 'high',
-        tags: ['database', 'performance', 'optimization']
-      },
-      {
-        id: '2',
-        category: 'cost',
-        title: 'Implement Auto-scaling',
-        description: 'Current fixed capacity leads to 40% resource waste during off-peak',
-        impact: 'medium',
-        effort: 'low',
-        estimatedSavings: '$200-400/month',
-        priority: 'medium',
-        tags: ['cost', 'scaling', 'automation']
-      },
-      {
-        id: '3',
-        category: 'security',
-        title: 'Enable Multi-factor Authentication',
-        description: 'Security audit shows MFA not enabled for 60% of users',
-        impact: 'high',
-        effort: 'low',
-        estimatedSavings: 'Reduced security risk by 80%',
-        priority: 'high',
-        tags: ['security', 'authentication', 'compliance']
-      },
-      {
-        id: '4',
-        category: 'monitoring',
-        title: 'Set Up Custom Alerts',
-        description: 'AI suggests 5 custom alert rules based on usage patterns',
-        impact: 'medium',
-        effort: 'low',
-        estimatedSavings: 'Faster incident response',
-        priority: 'medium',
-        tags: ['monitoring', 'alerts', 'automation']
-      }
-    ];
-
-    res.json(recommendations);
+    const aiResponse = await aiService.complete(
+      'Generate a JSON array of 4 AI recommendations for DevOps and business ops. '
+      + 'Each item must include: id, category, title, description, impact, effort, estimatedSavings, priority, tags.'
+    );
+    const parsed = extractJson(aiResponse);
+    return res.json({ ai_enabled: true, recommendations: Array.isArray(parsed) ? parsed : [] });
   } catch (error) {
     console.error('Recommendations error:', error);
     res.status(500).json({ error: 'Failed to generate recommendations' });
   }
 });
 
-// AI assistant chat endpoint
+// AI assistant chat — real AI only, honest otherwise.
 router.post('/chat', async (req, res) => {
   try {
     const { message, context } = req.body;
-
-    if (aiService.isEnabled() && message) {
-      const aiResponse = await aiService.complete(
-        `Context: ${JSON.stringify(context || {})}\nUser: ${message}\nProvide a concise helpful reply.`
-      );
-      if (aiResponse) {
-        return res.json({
-          response: aiResponse,
-          suggestions: [
-            'Show me the current deployment status',
-            'Analyze infrastructure costs',
-            'Check security vulnerabilities',
-            'Optimize performance',
-            'Set up monitoring alerts'
-          ],
-          timestamp: new Date().toISOString()
-        });
-      }
+    if (!aiService.isEnabled() || !message) {
+      return res.json({ ai_enabled: false, response: AI_NOT_CONNECTED, timestamp: new Date().toISOString() });
     }
-
-    const responses = {
-      deployment: 'I can help you with deployment. Would you like to set up a new CI/CD pipeline or troubleshoot an existing one?',
-      monitoring: 'For monitoring, I recommend checking the real-time metrics dashboard and setting up custom alerts for critical thresholds.',
-      cost: 'I can analyze your current infrastructure costs and suggest optimization strategies. Would you like a cost analysis report?',
-      security: 'Security is crucial. I can help you review access logs, set up security alerts, and implement best practices.',
-      performance: 'Performance optimization involves analyzing bottlenecks. Let me check your current metrics and suggest improvements.',
-      default: "I'm here to help with your DevOps needs. You can ask me about deployments, monitoring, cost optimization, security, or performance."
-    };
-
-    const messageLower = (message || '').toLowerCase();
-    let response = responses.default;
-
-    for (const [key, value] of Object.entries(responses)) {
-      if (messageLower.includes(key)) {
-        response = value;
-        break;
-      }
-    }
-
-    res.json({
-      response,
-      suggestions: [
-        'Show me the current deployment status',
-        'Analyze infrastructure costs',
-        'Check security vulnerabilities',
-        'Optimize performance',
-        'Set up monitoring alerts'
-      ],
-      timestamp: new Date().toISOString()
-    });
+    const aiResponse = await aiService.complete(
+      `Context: ${JSON.stringify(context || {})}\nUser: ${message}\nProvide a concise helpful reply.`
+    );
+    return res.json({ ai_enabled: true, response: aiResponse || AI_NOT_CONNECTED, timestamp: new Date().toISOString() });
   } catch (error) {
     console.error('Chat error:', error);
     res.status(500).json({ error: 'Failed to process chat message' });
@@ -326,50 +171,22 @@ router.post('/chat', async (req, res) => {
 });
 
 async function processAICommand(command) {
+  // Real AI output, or an honest bring-your-own-AI prompt — never fabricated.
+  if (!aiService.isEnabled()) {
+    return { message: AI_NOT_CONNECTED, action: 'none', success: false, ai_enabled: false };
+  }
   try {
     const aiResponse = await aiService.complete(
-      `User command: ${command}\nProvide a short actionable response for Aikya.`
+      `You are Aikya's operations copilot. User command: ${command}\n`
+      + 'Give a concise, actionable answer grounded in DevOps/business-ops best practice.'
     );
-
-    const lowerCommand = command.toLowerCase();
-    if (lowerCommand.includes('deploy')) {
-      return {
-        message: aiResponse || "I'll help you deploy your application. I can see you have projects ready. Would you like me to:\n\n- Deploy to AWS with auto-scaling\n- Set up CI/CD pipeline with GitHub Actions\n- Configure load balancing and SSL\n\nWhich project would you like to deploy?",
-        action: 'suggest_deployment',
-        success: true
-      };
-    } else if (lowerCommand.includes('scale')) {
-      return {
-        message: aiResponse || "I can help optimize your scaling strategy. Based on your current traffic patterns, I recommend:\n\n- Enable auto-scaling for your instances\n- Set up monitoring alerts for CPU > 70%\n- Configure scale-down during low traffic hours\n\nThis could save you approximately 30% on compute costs.",
-        action: 'suggest_scaling',
-        success: true
-      };
-    } else if (lowerCommand.includes('cost')) {
-      return {
-        message: aiResponse || "I've analyzed your infrastructure costs. Here are my recommendations:\n\n- Switch to Reserved Instances (save $234/month)\n- Right-size your databases (save $89/month)\n- Enable automated shutdown for dev environments (save $156/month)\n\nTotal potential savings: $479/month. Should I implement these optimizations?",
-        action: 'suggest_cost_optimization',
-        success: true
-      };
-    } else if (lowerCommand.includes('monitor') || lowerCommand.includes('alert')) {
-      return {
-        message: aiResponse || "I'll set up comprehensive monitoring for your applications:\n\n- CPU and memory usage alerts\n- Error rate monitoring\n- Response time tracking\n- Automated incident response\n\nWould you like me to configure these monitoring rules now?",
-        action: 'suggest_monitoring',
-        success: true
-      };
+    if (!aiResponse) {
+      return { message: AI_NOT_CONNECTED, action: 'none', success: false, ai_enabled: false };
     }
-
-    return {
-      message: aiResponse || "I understand you're looking for help with your DevOps workflow. I can assist with:\n\n- Application deployment and scaling\n- Infrastructure provisioning\n- Cost optimization\n- CI/CD pipeline setup\n- Monitoring and alerting\n\nCould you tell me more about what you'd like to achieve?",
-      action: 'none',
-      success: true
-    };
+    return { message: aiResponse, action: 'ai_response', success: true, ai_enabled: true };
   } catch (error) {
     console.error('AI provider error:', error);
-    return {
-      message: "I understand you're looking for help with your DevOps workflow. I can assist with:\n\n- Application deployment and scaling\n- Infrastructure provisioning\n- Cost optimization\n- CI/CD pipeline setup\n- Monitoring and alerting\n\nCould you tell me more about what you'd like to achieve?",
-      action: 'none',
-      success: true
-    };
+    return { message: 'The AI provider returned an error. Please check your AI configuration and try again.', action: 'none', success: false, ai_enabled: true };
   }
 }
 
@@ -457,38 +274,6 @@ function generateCostOptimizationRecommendations(resources) {
     totalPotentialSavings: totalSavings,
     recommendations
   };
-}
-
-function generateTrafficData() {
-  const data = [];
-  for (let i = 0; i < 8; i++) {
-    data.push(Math.floor(100 + Math.random() * 300));
-  }
-  return data;
-}
-
-function generateCostData() {
-  const data = [];
-  for (let i = 0; i < 8; i++) {
-    data.push(Math.floor(800 + Math.random() * 400));
-  }
-  return data;
-}
-
-function generatePerformanceData() {
-  const data = [];
-  for (let i = 0; i < 8; i++) {
-    data.push(Math.floor(150 + i * 15 + Math.random() * 20));
-  }
-  return data;
-}
-
-function generateSecurityData() {
-  const data = [];
-  for (let i = 0; i < 8; i++) {
-    data.push(Math.floor(Math.random() * 10));
-  }
-  return data;
 }
 
 export default router;

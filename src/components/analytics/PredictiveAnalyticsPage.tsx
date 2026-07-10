@@ -29,13 +29,14 @@ interface UsageMetric {
 
 const PredictiveAnalyticsPage: React.FC = () => {
   const [predictions, setPredictions] = useState<Prediction[]>([]);
+  const [aiEnabled, setAiEnabled] = useState<boolean>(true);
+  const [aiMessage, setAiMessage] = useState<string>('');
   const [usageMetrics, setUsageMetrics] = useState<UsageMetric[]>([]);
   const [selectedTimeframe, setSelectedTimeframe] = useState('7d');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [usageError, setUsageError] = useState<string | null>(null);
-  const { token, onboarding } = useAuth();
-  const showDemoData = onboarding?.demo_mode !== false;
+  const { token } = useAuth();
 
   const timeframeParam = useMemo(() => {
     if (selectedTimeframe === '1d') return '24h';
@@ -58,26 +59,23 @@ const PredictiveAnalyticsPage: React.FC = () => {
   }, [predictions]);
 
   useEffect(() => {
-    if (!showDemoData) {
-      setPredictions([]);
-      setUsageMetrics([]);
-      setLoading(false);
-      return;
-    }
     fetchPredictions();
     fetchUsageMetrics();
-  }, [selectedTimeframe, token, showDemoData]);
+  }, [selectedTimeframe, token]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const fetchPredictions = async () => {
     if (!token) return;
-    
+
     try {
       setLoading(true);
       const response = await axios.get(`${API_URL}/api/ai/predictions`, {
         headers: { Authorization: `Bearer ${token}` },
         params: { timeframe: selectedTimeframe }
       });
-      setPredictions(response.data);
+      // Backend returns { ai_enabled, predictions, message } — real AI only.
+      setAiEnabled(response.data?.ai_enabled !== false);
+      setPredictions(Array.isArray(response.data?.predictions) ? response.data.predictions : []);
+      setAiMessage(response.data?.message || '');
       setError(null);
     } catch (err) {
       console.error('Failed to fetch predictions:', err);
@@ -156,19 +154,22 @@ const PredictiveAnalyticsPage: React.FC = () => {
     );
   }
 
-  if (!showDemoData) {
+  if (!aiEnabled) {
     return (
       <div className="pt-20 min-h-screen bg-aikya">
         <div className="container mx-auto px-6 py-8">
           <div className="mb-8">
             <h1 className="text-3xl font-bold text-white mb-2">AI-Powered Predictive Analytics</h1>
-            <p className="text-slate-400">Live predictions will appear once data sources are connected.</p>
+            <p className="text-slate-400">Real AI analysis, on your own model.</p>
           </div>
-          <EmptyState
-            title="Awaiting live signals"
-            message="Connect pipelines, monitoring, and cloud data to unlock AI predictions."
-            icon={Sparkles}
-          />
+          <div className="max-w-2xl mx-auto text-center glass rounded-2xl border border-amber-400/20 p-10">
+            <Sparkles className="h-8 w-8 text-amber-300 mx-auto" />
+            <h2 className="text-2xl font-semibold text-white mt-4">Bring your own AI</h2>
+            <p className="text-slate-300 mt-3">
+              {aiMessage || 'Connect an AI provider (OpenAI or Anthropic) to unlock real-time predictions, cost optimization and recommendations — analysed by your own model for faster, tailored output.'}
+            </p>
+            <p className="text-xs text-slate-500 mt-4">Native Aikya AI is coming shortly. We never show fabricated analysis.</p>
+          </div>
         </div>
       </div>
     );

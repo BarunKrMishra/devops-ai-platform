@@ -439,55 +439,7 @@ router.get('/alerts', async (req, res) => {
       }
     }
 
-    if (alerts.length === 0) {
-      const alertTemplates = [
-        {
-          type: 'warning',
-          title: 'High CPU Usage',
-          message: 'CPU usage has been above 80% for the last 10 minutes',
-          condition: () => Math.random() > 0.7
-        },
-        {
-          type: 'info',
-          title: 'Deployment Successful',
-          message: 'Your application has been successfully deployed to production',
-          condition: () => Math.random() > 0.8
-        },
-        {
-          type: 'error',
-          title: 'Database Connection Failed',
-          message: 'Unable to connect to the database. Auto-healing in progress.',
-          condition: () => Math.random() > 0.9
-        },
-        {
-          type: 'warning',
-          title: 'Memory Usage Alert',
-          message: 'Memory usage is approaching 85% threshold',
-          condition: () => Math.random() > 0.75
-        },
-        {
-          type: 'info',
-          title: 'Backup Completed',
-          message: 'Daily backup completed successfully',
-          condition: () => Math.random() > 0.85
-        }
-      ];
-
-      const demoAlerts = alertTemplates
-        .filter((alert) => alert.condition())
-        .map((alert, index) => ({
-          id: index + 1,
-          type: alert.type,
-          title: alert.title,
-          message: alert.message,
-          timestamp: new Date(Date.now() - Math.random() * 60 * 60 * 1000).toISOString(),
-          resolved: Math.random() > 0.3
-        }))
-        .slice(0, 5);
-
-      return res.json(demoAlerts);
-    }
-
+    // No fabricated alerts — if nothing is connected, there are simply no alerts.
     res.json(alerts.slice(0, 8));
   } catch (error) {
     console.error('Alerts fetch error:', error);
@@ -501,6 +453,7 @@ router.post('/auto-heal/:resourceId', async (req, res) => {
     const { resourceId } = req.params;
     const { issue } = req.body;
     const userId = req.user.id;
+    const organizationId = req.user.organization_id;
 
     // Get resource
     const resource = await InfrastructureResource.findByPk(resourceId, { raw: true });
@@ -508,8 +461,10 @@ router.post('/auto-heal/:resourceId', async (req, res) => {
       return res.status(404).json({ error: 'Resource not found' });
     }
 
+    // Resource must belong to a project in the caller's organization (org-scoped,
+    // consistent with the rest of the platform).
     const project = resource.project_id
-      ? await Project.findOne({ where: { id: resource.project_id, user_id: userId }, raw: true })
+      ? await Project.findOne({ where: { id: resource.project_id, organization_id: organizationId }, raw: true })
       : null;
 
     if (!project) {
@@ -556,10 +511,10 @@ router.post('/auto-heal/:resourceId', async (req, res) => {
 router.get('/health/:projectId', async (req, res) => {
   try {
     const { projectId } = req.params;
-    const userId = req.user.id;
+    const organizationId = req.user.organization_id;
 
-    // Verify project ownership
-    const project = await Project.findOne({ where: { id: projectId, user_id: userId }, raw: true });
+    // Verify the project belongs to the caller's organization (org-scoped).
+    const project = await Project.findOne({ where: { id: projectId, organization_id: organizationId }, raw: true });
     if (!project) {
       return res.status(404).json({ error: 'Project not found' });
     }
@@ -571,7 +526,7 @@ router.get('/health/:projectId', async (req, res) => {
     const healthStatus = {
       overall: Math.random() > 0.1 ? 'healthy' : 'warning',
       services: resources.map(resource => ({
-        id: String(resource._id),
+        id: String(resource.id),
         type: resource.resource_type,
         status: Math.random() > 0.15 ? 'healthy' : (Math.random() > 0.5 ? 'warning' : 'critical'),
         uptime: Math.random() * 100,

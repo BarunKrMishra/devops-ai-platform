@@ -351,6 +351,7 @@ const BusinessIntegrationsPage: React.FC = () => {
                             />
                           ) : field.type === 'select' ? (
                             <select
+                              aria-label={field.label}
                               className="w-full mt-2 p-3 rounded-lg bg-slate-900/70 border border-white/10 text-slate-100"
                               value={formState[provider.key]?.[field.key] || ''}
                               onChange={(event) => updateField(provider.key, field.key, event.target.value)}

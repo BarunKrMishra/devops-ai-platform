@@ -3,6 +3,23 @@ import crypto from 'crypto';
 import { Op, fn, col, where } from 'sequelize';
 import { Webhook } from '../models/index.js';
 import { logAuditAction } from '../utils/audit.js';
+import { requireRole } from '../middleware/auth.js';
+
+// Webhooks egress organization events to external URLs with a signing secret,
+// so managing them is an admin/manager operation.
+const requireManager = requireRole(['admin', 'manager']);
+
+const isValidHttpUrl = (value) => {
+  if (typeof value !== 'string' || !value.trim()) {
+    return false;
+  }
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+  } catch {
+    return false;
+  }
+};
 
 const router = express.Router();
 
@@ -37,11 +54,18 @@ router.get('/', async (req, res) => {
 });
 
 // Create webhook
-router.post('/', async (req, res) => {
+router.post('/', requireManager, async (req, res) => {
   try {
     const { name, url, events, project_id } = req.body;
     const userId = req.user.id;
     const organizationId = req.user.organization_id;
+
+    if (!name || !name.trim()) {
+      return res.status(400).json({ error: 'Webhook name is required.' });
+    }
+    if (!isValidHttpUrl(url)) {
+      return res.status(400).json({ error: 'A valid http(s) URL is required.' });
+    }
 
     const secret = crypto.randomBytes(32).toString('hex');
 
@@ -73,12 +97,16 @@ router.post('/', async (req, res) => {
 });
 
 // Update webhook
-router.put('/:id', async (req, res) => {
+router.put('/:id', requireManager, async (req, res) => {
   try {
     const { id } = req.params;
     const { name, url, events, is_active } = req.body;
     const userId = req.user.id;
     const organizationId = req.user.organization_id;
+
+    if (url !== undefined && !isValidHttpUrl(url)) {
+      return res.status(400).json({ error: 'A valid http(s) URL is required.' });
+    }
 
     const webhook = await Webhook.findOne({ where: { id, organization_id: organizationId }, raw: true });
 
@@ -111,7 +139,7 @@ router.put('/:id', async (req, res) => {
 });
 
 // Delete webhook
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', requireManager, async (req, res) => {
   try {
     const { id } = req.params;
     const userId = req.user.id;
@@ -186,7 +214,7 @@ export const triggerWebhook = async (event, data) => {
 };
 
 // Test webhook
-router.post('/:id/test', async (req, res) => {
+router.post('/:id/test', requireManager, async (req, res) => {
   try {
     const { id } = req.params;
     const userId = req.user.id;

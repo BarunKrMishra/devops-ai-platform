@@ -217,6 +217,7 @@ const InfrastructureManagementPage: React.FC = () => {
             <div className="flex items-center gap-3">
               {projects.length > 0 ? (
                 <select
+                  aria-label="Select project"
                   value={selectedProject ?? ''}
                   onChange={(event) => setSelectedProject(Number(event.target.value))}
                   className="px-3 py-2 rounded-lg bg-white/10 border border-white/20 text-white focus:border-amber-400 focus:outline-none"
