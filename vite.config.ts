@@ -7,6 +7,9 @@ export default defineConfig({
   plugins: [react()],
   build: {
     outDir: 'dist',
+    // Transpile down so the static prerenderer (react-snap) and older browsers
+    // can execute the bundle (e.g. optional chaining), improving compatibility.
+    target: 'es2017',
     sourcemap: process.env.NODE_ENV === 'development',
     minify: 'terser',
     terserOptions: {

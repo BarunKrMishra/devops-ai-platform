@@ -3,6 +3,13 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
+  "reactSnap": {
+    "source": "dist",
+    "include": ["/", "/pricing"],
+    "skipThirdPartyRequests": true,
+    "inlineCss": false,
+    "puppeteerArgs": ["--no-sandbox", "--disable-setuid-sandbox"]
+  },
   "scripts": {
     "dev": "concurrently \"npm run server:dev\" \"npm run client\"",
     "client": "vite",
@@ -16,12 +23,14 @@
     "ops:marketing": "node services/ops-marketing/index.js",
     "ops:all": "concurrently \"npm run ops:aidevops\" \"npm run ops:business\" \"npm run ops:commerce\" \"npm run ops:finance\" \"npm run ops:project\" \"npm run ops:marketing\"",
     "build": "tsc -b && vite build",
+    "build:seo": "npm run build && (react-snap || echo prerender skipped)",
     "lint": "eslint .",
     "preview": "vite preview",
     "start": "NODE_ENV=production node server/index.js",
     "test": "jest",
     "test-deployment": "node scripts/test-deployment.js",
     "migrate": "node server/database/migrate.js",
+    "reset:dev": "node scripts/reset-dev-data.js",
     "backup": "node scripts/backup.js",
     "security-check": "npm audit && snyk test"
   },
@@ -73,6 +82,7 @@
     "lint-staged": "^15.2.2",
     "nodemon": "^3.1.10",
     "postcss": "^8.4.49",
+    "react-snap": "^1.23.0",
     "snyk": "^1.1280.0",
     "supertest": "^6.3.4",
     "tailwindcss": "^3.4.14",
