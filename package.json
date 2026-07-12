@@ -5,10 +5,16 @@
   "type": "module",
   "reactSnap": {
     "source": "dist",
-    "include": ["/", "/pricing"],
+    "include": [
+      "/",
+      "/pricing"
+    ],
     "skipThirdPartyRequests": true,
     "inlineCss": false,
-    "puppeteerArgs": ["--no-sandbox", "--disable-setuid-sandbox"]
+    "puppeteerArgs": [
+      "--no-sandbox",
+      "--disable-setuid-sandbox"
+    ]
   },
   "scripts": {
     "dev": "concurrently \"npm run server:dev\" \"npm run client\"",
@@ -54,6 +60,8 @@
     "mailparser": "^3.9.1",
     "mysql2": "^3.12.0",
     "nodemailer": "^9.0.3",
+    "pg": "^8.22.0",
+    "pg-hstore": "^2.3.4",
     "qrcode": "^1.5.4",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",

@@ -27,10 +27,23 @@ const requireEnv = (key) => {
 const validateSecrets = () => {
   requireEnv('JWT_SECRET');
   requireEnv('INTEGRATION_MASTER_KEY');
-  // MySQL connection details are only required when actually using MySQL.
-  // SQLite (DB_DIALECT=sqlite) is self-contained and needs no host/user/db.
-  const usingSqlite = String(process.env.DB_DIALECT || '').toLowerCase().trim() === 'sqlite';
-  if (!usingSqlite && !process.env.MYSQL_URL) {
+
+  // Database connection requirements depend on the dialect.
+  // - sqlite: self-contained, needs nothing.
+  // - postgres: needs a connection URL (DATABASE_URL / POSTGRES_URL) or discrete PG vars.
+  // - mysql: needs MYSQL_URL or discrete MYSQL_* vars.
+  const dialect = String(process.env.DB_DIALECT || '').toLowerCase().trim();
+  const usingSqlite = dialect === 'sqlite';
+  const usingPostgres = dialect === 'postgres' || dialect === 'postgresql';
+
+  if (usingPostgres) {
+    const hasUrl = process.env.DATABASE_URL || process.env.POSTGRES_URL || process.env.SUPABASE_DB_URL;
+    if (!hasUrl) {
+      requireEnv('PGHOST');
+      requireEnv('PGUSER');
+      requireEnv('PGDATABASE');
+    }
+  } else if (!usingSqlite && !process.env.MYSQL_URL) {
     requireEnv('MYSQL_HOST');
     requireEnv('MYSQL_USER');
     requireEnv('MYSQL_DATABASE');

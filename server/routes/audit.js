@@ -1,6 +1,7 @@
 import express from 'express';
 import { Op, fn, col } from 'sequelize';
 import { AuditLog, User } from '../models/index.js';
+import { dayBucket } from '../database/sequelize.js';
 import { requireRole } from '../middleware/auth.js';
 
 const router = express.Router();
@@ -161,11 +162,12 @@ router.get('/stats', requireRole(['admin', 'manager']), async (req, res) => {
       action_count: Number(row.action_count)
     }));
 
+    const dateExpr = dayBucket('created_at');
     const dailyStats = await AuditLog.findAll({
       where: { organization_id: organizationId, created_at: { [Op.gte]: startDate } },
-      attributes: [[fn('DATE_FORMAT', col('created_at'), '%Y-%m-%d'), 'date'], [fn('COUNT', col('id')), 'count']],
-      group: [fn('DATE_FORMAT', col('created_at'), '%Y-%m-%d')],
-      order: [[fn('DATE_FORMAT', col('created_at'), '%Y-%m-%d'), 'DESC']],
+      attributes: [[dateExpr, 'date'], [fn('COUNT', col('id')), 'count']],
+      group: [dateExpr],
+      order: [[dateExpr, 'DESC']],
       raw: true
     });
 
